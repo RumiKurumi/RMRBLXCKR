@@ -199,7 +199,7 @@ function Show-Header {
 	Write-TypewriterText "╔══════════════════════════════════════════════════════════════╗" $Colors.Header 2
 	Write-TypewriterText "║                                                              ║" $Colors.Header 2
 	Write-TypewriterText "║               🎮 ROBLOX CHECKER BY RUMI 🎮                   ║" $Colors.Header 2
-	Write-TypewriterText "║                    Version $Global:ScriptVersion                                   ║" $Colors.Header 2
+	Write-TypewriterText "║                    Version $Global:ScriptVersion                            ║" $Colors.Header 2
 	Write-TypewriterText "║                                                              ║" $Colors.Header 2
 	Write-TypewriterText "╚══════════════════════════════════════════════════════════════╝" $Colors.Header 2
 	Write-Host ""
@@ -234,17 +234,67 @@ function Get-UserChoice {
     } while ($true)
 }
 
-function Confirm-Action {
+# Konfirmasi tiga opsi: Y / N / S (Skip)
+function Confirm-ActionEx {
     param([string]$Message)
-    Write-ColorText "$Message (Y/N): " -Color $Colors.Warning -NoNewLine
+    Write-ColorText ("$Message (Y=Ya / N=Tidak / S=Skip): ") -Color $Colors.Warning -NoNewLine
     do {
         $response = Read-Host
-        if ($response -match '^[YyNn]$') {
-            return ($response -match '^[Yy]$')
+        if ($response -match '^[YyNnSs]$') {
+            if ($response -match '^[Yy]$') { return 'Yes' }
+            if ($response -match '^[Nn]$') { return 'No' }
+            return 'Skip'
         } else {
-            Write-ColorText "❌ Jawab dengan Y atau N: " -Color $Colors.Error -NoNewLine
+            Write-ColorText "❌ Jawab dengan Y, N, atau S: " -Color $Colors.Error -NoNewLine
         }
     } while ($true)
+}
+
+# Cek kesehatan executable Roblox
+function Get-ExecutableHealth {
+    param([string]$ExecutablePath)
+    $result = @{ Exists = $false; SizeBytes = 0; IsSigned = $false; SignatureStatus = 'Unknown'; Health = 'Tidak ditemukan' }
+    try {
+        if ($ExecutablePath -and (Test-Path $ExecutablePath)) {
+            $result.Exists = $true
+            $fi = Get-Item $ExecutablePath -ErrorAction SilentlyContinue
+            if ($fi) { $result.SizeBytes = $fi.Length }
+            $sig = Get-AuthenticodeSignature -FilePath $ExecutablePath -ErrorAction SilentlyContinue
+            if ($sig) {
+                $result.IsSigned = ($null -ne $sig.SignerCertificate)
+                $result.SignatureStatus = [string]$sig.Status
+            }
+            if ($result.SizeBytes -gt 0 -and ($result.SignatureStatus -eq 'Valid' -or -not $result.IsSigned)) {
+                $result.Health = 'Aman'
+            } elseif ($result.SizeBytes -eq 0) {
+                $result.Health = 'Rusak (0 byte)'
+            } else {
+                $result.Health = 'Perlu dicek (tanda tangan tidak valid)'
+            }
+        }
+    } catch {}
+    return $result
+}
+
+# Uji konektivitas Roblox (Ping + HTTP)
+function Test-RobloxConnectivity {
+    $conn = @{ PingOk = $false; HttpOkMain = $false; HttpOkApi = $false; Detail = @() }
+    try {
+        $ping = Test-Connection "roblox.com" -Count 1 -Quiet -ErrorAction SilentlyContinue -TimeoutSeconds 2
+        $conn.PingOk = [bool]$ping
+        if (-not $conn.PingOk) { $conn.Detail += 'Ping roblox.com gagal' }
+    } catch { $conn.Detail += 'Ping error' }
+    try {
+        $r1 = Invoke-WebRequest -Method Head -Uri 'https://www.roblox.com' -TimeoutSec 5 -UseBasicParsing -ErrorAction SilentlyContinue
+        $conn.HttpOkMain = [bool]($r1 -and $r1.StatusCode -ge 200 -and $r1.StatusCode -lt 400)
+        if (-not $conn.HttpOkMain) { $conn.Detail += 'HTTP https://www.roblox.com gagal' }
+    } catch { $conn.Detail += 'HTTP main error' }
+    try {
+        $r2 = Invoke-WebRequest -Method Head -Uri 'https://apis.roblox.com' -TimeoutSec 5 -UseBasicParsing -ErrorAction SilentlyContinue
+        $conn.HttpOkApi = [bool]($r2 -and $r2.StatusCode -ge 200 -and $r2.StatusCode -lt 400)
+        if (-not $conn.HttpOkApi) { $conn.Detail += 'HTTP https://apis.roblox.com gagal' }
+    } catch { $conn.Detail += 'HTTP api error' }
+    return $conn
 }
 
 # ==================== SYSTEM DETECTION FUNCTIONS ====================
@@ -293,6 +343,7 @@ function Get-RobloxInfo {
 		ProcessCount = 0
 		InstallDate = ""
 		Size = 0
+		ExecHealth = $null
 	}
 	
 	$possiblePaths = @(
@@ -328,6 +379,8 @@ function Get-RobloxInfo {
 				break
 			}
 		}
+		# Evaluasi kesehatan executable
+		if ($robloxInfo.ExecutablePath) { $robloxInfo.ExecHealth = Get-ExecutableHealth -ExecutablePath $robloxInfo.ExecutablePath }
 	}
 	
 	# Check running processes
@@ -395,30 +448,30 @@ function Test-SystemRequirements {
         $requirements.RAM.Current = "$ramGB GB"
         $requirements.RAM.Met = $ramGB -ge 1
         
-        # Check DirectX via dxdiag (lebih akurat daripada registry)
+        # Check DirectX via dxdiag (multi-locale)
 		try {
 			$dxDiagTxt = Join-Path $env:TEMP ("dxdiag_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".txt")
 			$proc = Start-Process -FilePath "dxdiag.exe" -ArgumentList "/whql:off", "/t", $dxDiagTxt -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
 			if ($proc) { Wait-Process -Id $proc.Id -Timeout 15 -ErrorAction SilentlyContinue }
 			if (Test-Path $dxDiagTxt) {
-				$line = (Select-String -Path $dxDiagTxt -Pattern 'DirectX Version' -SimpleMatch -ErrorAction SilentlyContinue | Select-Object -First 1).Line
+				$line = $null
+				$patterns = @('DirectX Version','Versi DirectX')
+				foreach ($p in $patterns) {
+					$hit = Select-String -Path $dxDiagTxt -Pattern $p -SimpleMatch -ErrorAction SilentlyContinue | Select-Object -First 1
+					if ($hit) { $line = $hit.Line; break }
+				}
 				if ($line) {
 					$ver = ($line -split ':',2)[1].Trim()
 					$requirements.DirectX.Current = $ver
-					if ($ver -match 'DirectX\s+(\d+)' -and [int]$Matches[1] -ge 9) { $requirements.DirectX.Met = $true } else { $requirements.DirectX.Met = $true }
+					$numMatch = [regex]::Match($ver, '(\d+)')
+					if ($numMatch.Success -and [int]$numMatch.Groups[1].Value -ge 9) { $requirements.DirectX.Met = $true } else { $requirements.DirectX.Met = $true }
 				} else {
 					$requirements.DirectX.Current = "Tidak terdeteksi"
 				}
 				try { Remove-Item $dxDiagTxt -Force -ErrorAction SilentlyContinue } catch {}
-			} else {
-				$requirements.DirectX.Current = "Tidak terdeteksi"
-			}
+			} else { $requirements.DirectX.Current = "Tidak terdeteksi" }
 		} catch {
-			# Fallback ke registry (legacy, sering menunjukkan 4.09.00.0904)
-			try {
-				$dx = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\DirectX" -Name Version -ErrorAction SilentlyContinue
-				if ($dx) { $requirements.DirectX.Current = $dx.Version; $requirements.DirectX.Met = $true } else { $requirements.DirectX.Current = "Tidak terdeteksi" }
-			} catch { $requirements.DirectX.Current = "Tidak terdeteksi" }
+			try { $dx = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\DirectX" -Name Version -ErrorAction SilentlyContinue; if ($dx) { $requirements.DirectX.Current = $dx.Version; $requirements.DirectX.Met = $true } } catch { $requirements.DirectX.Current = "Tidak terdeteksi" }
 		}
         
         # Check .NET Framework
@@ -741,73 +794,84 @@ function Install-MissingDependencies {
 # ==================== REPORT FUNCTIONS ====================
 
 function Show-SystemReport {
-	param($SystemInfo, $RobloxInfo, $Requirements, $LogInfo)
-	
-	Write-ColorText "`n📋 LAPORAN SISTEM" -Color $Colors.Header
-	Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
-	
-	if ($SystemInfo) {
-		Write-ColorText "🖥️  Sistem Operasi: " -Color $Colors.Info -NoNewLine
-		Write-ColorText $SystemInfo.OSName -Color $Colors.Accent
-		Write-ColorText "🏗️  Arsitektur: " -Color $Colors.Info -NoNewLine
-		Write-ColorText $SystemInfo.OSArchitecture -Color $Colors.Accent
-		Write-ColorText "🧠 Prosesor: " -Color $Colors.Info -NoNewLine
-		Write-ColorText $SystemInfo.CPUName -Color $Colors.Accent
-		Write-ColorText "💾 RAM: " -Color $Colors.Info -NoNewLine
-		Write-ColorText "$($SystemInfo.RAMSize) GB" -Color $Colors.Accent
-		Write-ColorText "🎮 GPU: " -Color $Colors.Info -NoNewLine
-		Write-ColorText $SystemInfo.GPUName -Color $Colors.Accent
-		Write-ColorText "⚡ PowerShell: " -Color $Colors.Info -NoNewLine
-		Write-ColorText $SystemInfo.PowerShellVersion -Color $Colors.Accent
-	}
-	Pause-ForSmoothness
-	
-	Write-ColorText "`n🎮 STATUS ROBLOX" -Color $Colors.Header
-	Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
-	
-	if ($RobloxInfo.IsInstalled) {
-		Write-ColorText "✅ Status: Terinstall" -Color $Colors.Success
-		Write-ColorText "📁 Lokasi: $($RobloxInfo.InstallPath)" -Color $Colors.Info
-		if ($RobloxInfo.ExecutablePath) { Write-ColorText "📄 Executable: $(Split-Path $RobloxInfo.ExecutablePath -Leaf)" -Color $Colors.Info }
-		if ($RobloxInfo.Version) { Write-ColorText "🔖 Versi: $($RobloxInfo.Version)" -Color $Colors.Info }
-		Write-ColorText "📊 Ukuran: $($RobloxInfo.Size) MB" -Color $Colors.Info
-		if ($RobloxInfo.InstallDate) { Write-ColorText "📅 Install: $($RobloxInfo.InstallDate)" -Color $Colors.Info }
-		if ($RobloxInfo.IsRunning) { Write-ColorText "🟢 Status: Berjalan ($($RobloxInfo.ProcessCount) proses)" -Color $Colors.Success } else { Write-ColorText "🔴 Status: Tidak berjalan" -Color $Colors.Error }
-	} else {
-		Write-ColorText "❌ Status: Tidak terinstall" -Color $Colors.Error
-	}
-	Pause-ForSmoothness
-	
-	Write-ColorText "`n✅ PERSYARATAN SISTEM" -Color $Colors.Header
-	Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
-	foreach ($req in $Requirements.GetEnumerator()) {
-		$met = if ($req.Value.Met) { "✅" } else { "❌" }
-		$color = if ($req.Value.Met) { $Colors.Success } else { $Colors.Error }
-		Write-ColorText "$met $($req.Key): " -Color $color -NoNewLine
-		Write-ColorText "$($req.Value.Current)" -Color $Colors.Info
-		Write-ColorText "   Diperlukan: $($req.Value.Required)" -Color $Colors.Info
-	}
-	Pause-ForSmoothness
-	
-	if ($LogInfo.Found) {
-		try {
-			$desktopPath = [Environment]::GetFolderPath('Desktop')
-			$desktopLogs = (Resolve-Path (Join-Path $desktopPath 'logschecker') -ErrorAction SilentlyContinue).Path
-			if (-not $desktopLogs) { $desktopLogs = (Resolve-Path $script:LogPath -ErrorAction SilentlyContinue).Path }
-		} catch { $desktopLogs = $script:LogPath }
-		Write-ColorText "`n📄 LOG ROBLOX" -Color $Colors.Header
-		Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
-		Write-ColorText "📁 Ditemukan: $($LogInfo.LogPaths.Count) file log" -Color $Colors.Success
-		Write-ColorText "📂 Lokasi log (Ctrl+Click):" -Color $Colors.Info
-		Write-Host $desktopLogs
-		# Tampilkan cuplikan error/crash singkat
-		if ($LogInfo.ErrorSummary.Count -gt 0) {
-			Write-ColorText "🔎 Cuplikan Error/Crash (maks 3):" -Color $Colors.Warning
-			$preview = [Math]::Min(3, $LogInfo.ErrorSummary.Count)
-			for ($i=0; $i -lt $preview; $i++) { Write-ColorText ("   • " + $LogInfo.ErrorSummary[$i]) -Color $Colors.Info }
-			if ($LogInfo.ErrorSummary.Count -gt $preview) { Write-ColorText "   ...lihat ringkasan lengkap di bagian diagnosis." -Color $Colors.Info }
-		}
-	}
+    param($SystemInfo, $RobloxInfo, $Requirements, $LogInfo, $Connectivity)
+    
+    Write-ColorText "`n📋 LAPORAN SISTEM" -Color $Colors.Header
+    Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+    
+    if ($SystemInfo) {
+        Write-ColorText "🖥️  Sistem Operasi: " -Color $Colors.Info -NoNewLine
+        Write-ColorText $SystemInfo.OSName -Color $Colors.Accent
+        Write-ColorText "🏗️  Arsitektur: " -Color $Colors.Info -NoNewLine
+        Write-ColorText $SystemInfo.OSArchitecture -Color $Colors.Accent
+        Write-ColorText "🧠 Prosesor: " -Color $Colors.Info -NoNewLine
+        Write-ColorText $SystemInfo.CPUName -Color $Colors.Accent
+        Write-ColorText "💾 RAM: " -Color $Colors.Info -NoNewLine
+        Write-ColorText "$($SystemInfo.RAMSize) GB" -Color $Colors.Accent
+        Write-ColorText "🎮 GPU: " -Color $Colors.Info -NoNewLine
+        Write-ColorText $SystemInfo.GPUName -Color $Colors.Accent
+        Write-ColorText "⚡ PowerShell: " -Color $Colors.Info -NoNewLine
+        Write-ColorText $SystemInfo.PowerShellVersion -Color $Colors.Accent
+    }
+    Start-ReportDelay
+    
+    Write-ColorText "`n🎮 STATUS ROBLOX" -Color $Colors.Header
+    Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+    
+    if ($RobloxInfo.IsInstalled) {
+        Write-ColorText "✅ Status: Terinstall" -Color $Colors.Success
+        Write-ColorText "📁 Lokasi: $($RobloxInfo.InstallPath)" -Color $Colors.Info
+        if ($RobloxInfo.ExecutablePath) { Write-ColorText "📄 Executable: $(Split-Path $RobloxInfo.ExecutablePath -Leaf)" -Color $Colors.Info }
+        if ($RobloxInfo.Version) { Write-ColorText "🔖 Versi: $($RobloxInfo.Version)" -Color $Colors.Info }
+        Write-ColorText "📊 Ukuran: $($RobloxInfo.Size) MB" -Color $Colors.Info
+        if ($RobloxInfo.InstallDate) { Write-ColorText "📅 Install: $($RobloxInfo.InstallDate)" -Color $Colors.Info }
+        if ($RobloxInfo.ExecHealth) {
+            Write-ColorText "🔒 Kesehatan Executable: $($RobloxInfo.ExecHealth.Health)" -Color $Colors.Info
+            Write-ColorText "   Tanda Tangan: $($RobloxInfo.ExecHealth.SignatureStatus)" -Color $Colors.Info
+        }
+        if ($RobloxInfo.IsRunning) { Write-ColorText "🟢 Status: Berjalan ($($RobloxInfo.ProcessCount) proses)" -Color $Colors.Success } else { Write-ColorText "🔴 Status: Tidak berjalan" -Color $Colors.Error }
+    } else {
+        Write-ColorText "❌ Status: Tidak terinstall" -Color $Colors.Error
+    }
+    Start-ReportDelay
+    
+    Write-ColorText "`n✅ PERSYARATAN SISTEM" -Color $Colors.Header
+    Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+    foreach ($req in $Requirements.GetEnumerator()) {
+        $met = if ($req.Value.Met) { "✅" } else { "❌" }
+        $color = if ($req.Value.Met) { $Colors.Success } else { $Colors.Error }
+        Write-ColorText "$met $($req.Key): " -Color $color -NoNewLine
+        Write-ColorText "$($req.Value.Current)" -Color $Colors.Info
+        Write-ColorText "   Diperlukan: $($req.Value.Required)" -Color $Colors.Info
+    }
+    Start-ReportDelay
+
+    # Konektivitas
+    if ($Connectivity) {
+        Write-ColorText "`n🌐 KONEKTIVITAS ROBLOX" -Color $Colors.Header
+        Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+        Write-ColorText ("Ping roblox.com: " + (if ($Connectivity.PingOk) { 'OK' } else { 'Gagal' })) -Color $Colors.Info
+        Write-ColorText ("HTTP www.roblox.com: " + (if ($Connectivity.HttpOkMain) { 'OK' } else { 'Gagal' })) -Color $Colors.Info
+        Write-ColorText ("HTTP apis.roblox.com: " + (if ($Connectivity.HttpOkApi) { 'OK' } else { 'Gagal' })) -Color $Colors.Info
+    }
+    
+    if ($LogInfo.Found) {
+        try {
+            $desktopPath = [Environment]::GetFolderPath('Desktop')
+            $desktopLogs = (Resolve-Path (Join-Path $desktopPath 'logschecker') -ErrorAction SilentlyContinue).Path
+            if (-not $desktopLogs) { $desktopLogs = (Resolve-Path $script:LogPath -ErrorAction SilentlyContinue).Path }
+        } catch { $desktopLogs = $script:LogPath }
+        Write-ColorText "`n📄 LOG ROBLOX" -Color $Colors.Header
+        Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+        Write-ColorText "📁 Ditemukan: $($LogInfo.LogPaths.Count) file log" -Color $Colors.Success
+        Write-ColorText "📂 Lokasi log (Ctrl+Click):" -Color $Colors.Info
+        Write-Host $desktopLogs
+        if ($LogInfo.ErrorSummary.Count -gt 0) {
+            Write-ColorText "🔎 Cuplikan Error/Crash (maks 3):" -Color $Colors.Warning
+            $preview = [Math]::Min(3, $LogInfo.ErrorSummary.Count)
+            for ($i=0; $i -lt $preview; $i++) { Write-ColorText ("   • " + $LogInfo.ErrorSummary[$i]) -Color $Colors.Info }
+        }
+    }
 }
 
 function Show-DiagnosisReport {
@@ -823,7 +887,7 @@ function Show-DiagnosisReport {
         Write-ColorText "   Roblox seharusnya berjalan dengan normal." -Color $Colors.Info
         return $false
     }
-    Pause-ForSmoothness
+    Start-ReportDelay
     
     Write-ColorText "⚠️ Ditemukan $totalIssues masalah:" -Color $Colors.Warning
     
@@ -832,14 +896,14 @@ function Show-DiagnosisReport {
         foreach ($issue in $IntegrityIssues) {
             Write-ColorText "   • $issue" -Color $Colors.Error
         }
-        Pause-ForSmoothness
+        Start-ReportDelay
     }
     if ($CommonIssues.Count -gt 0) {
         Write-ColorText "`n⚠️ Masalah Umum:" -Color $Colors.Warning
         foreach ($issue in $CommonIssues) {
             Write-ColorText "   • $issue" -Color $Colors.Warning
         }
-        Pause-ForSmoothness
+        Start-ReportDelay
     }
     if ($LogInfo.ErrorSummary.Count -gt 0) {
         Write-ColorText "`n🚨 Ringkasan Error/Crash dari Log Roblox:" -Color $Colors.Error
@@ -991,137 +1055,109 @@ function Show-Goodbye {
 
 # ==================== INTERACTIVE FUNCTIONS ====================
 
-function Redraw-HeaderAndReset {
-	try {
-		Clear-Host
-		Show-Header
-		[Console]::SetCursorPosition(0, $Global:ContentStartY)
-	} catch {}
+function Reset-Header {
+    try { Clear-Host; Show-Header; [Console]::SetCursorPosition(0, $Global:ContentStartY) } catch {}
 }
 
 function Show-ArrowMenu {
-	param(
-		[string[]]$Options,
-		[int]$Default = 0
-	)
-	$selected = $Default
-	$arrow = "➤"
+    param(
+        [string[]]$Options,
+        [int]$Default = 0
+    )
+    $selected = $Default
+    $arrow = "➤"
 
-	# Gambar sekali di awal
-	Clear-Host
-	Show-Header
-	Write-Host "🎯 PILIHAN TINDAKAN" -ForegroundColor DarkYellow
-	Write-Host "═══════════════════════════════════════" -ForegroundColor Gray
-	# Simpan posisi awal baris opsi
-	$optionsTopY = 0
-	try { $optionsTopY = [Console]::CursorTop } catch { $optionsTopY = 0 }
+    # Gambar sekali di awal
+    Clear-Host
+    Show-Header
+    Write-Host "🎯 PILIHAN TINDAKAN" -ForegroundColor DarkYellow
+    Write-Host "═══════════════════════════════════════" -ForegroundColor Gray
+    # Simpan posisi awal baris opsi
+    $optionsTopY = 0
+    try { $optionsTopY = [Console]::CursorTop } catch { $optionsTopY = 0 }
 
-	function Render-Options {
-		param([int]$Sel)
-		try { [Console]::SetCursorPosition(0, $optionsTopY) } catch {}
-		for ($i=0; $i -lt $Options.Length; $i++) {
-			if ($i -eq $Sel) {
-				Write-Host ($arrow + " " + $Options[$i] + (" " * 40)) -ForegroundColor Black -BackgroundColor Yellow
-			} else {
-				Write-Host ("  " + $Options[$i] + (" " * 40)) -ForegroundColor DarkYellow
-			}
-		}
-		# Garis instruksi persis di bawah daftar opsi
-		Write-Host ""  
-		Write-Host "Gunakan panah atas/bawah, Enter untuk pilih. (Jika tidak bisa, ketik angka pilihan)" -ForegroundColor Gray
-	}
+    function Write-MenuOptions {
+        param([int]$Sel)
+        try { [Console]::SetCursorPosition(0, $optionsTopY) } catch {}
+        for ($i=0; $i -lt $Options.Length; $i++) {
+            if ($i -eq $Sel) {
+                Write-Host ($arrow + " " + $Options[$i] + (" " * 40)) -ForegroundColor Black -BackgroundColor Yellow
+            } else {
+                Write-Host ("  " + $Options[$i] + (" " * 40)) -ForegroundColor DarkYellow
+            }
+        }
+        Write-Host ""
+        Write-Host "Gunakan panah atas/bawah, Enter untuk pilih. (Jika tidak bisa, ketik angka pilihan)" -ForegroundColor Gray
+    }
 
-	Render-Options -Sel $selected
-	
-	do {
-		$key = $null
-		try { $key = [System.Console]::ReadKey($true) } catch {}
-		if ($key) {
-			if ($key.Key -eq "UpArrow") {
-				$selected = if ($selected -le 0) { $Options.Length-1 } else { $selected-1 }
-				Render-Options -Sel $selected
-			} elseif ($key.Key -eq "DownArrow") {
-				$selected = if ($selected -ge $Options.Length-1) { 0 } else { $selected+1 }
-				Render-Options -Sel $selected
-			} elseif ($key.Key -eq "Enter") {
-				return ($selected+1)
-			}
-		} else {
-			# Fallback input angka tanpa clear seluruh layar
-			try { [Console]::SetCursorPosition(0, ($optionsTopY + $Options.Length + 2)) } catch {}
-			$userInput = Read-Host ("Pilihan Anda (1-" + $Options.Length + ")")
-			if ($userInput -match ("^[1-" + $Options.Length + "]$")) { return [int]$userInput }
-			Render-Options -Sel $selected
-		}
-	} while ($true)
+    Write-MenuOptions -Sel $selected
+    
+    do {
+        $key = $null
+        try { $key = [System.Console]::ReadKey($true) } catch {}
+        if ($key) {
+            if ($key.Key -eq "UpArrow") { $selected = if ($selected -le 0) { $Options.Length-1 } else { $selected-1 }; Write-MenuOptions -Sel $selected }
+            elseif ($key.Key -eq "DownArrow") { $selected = if ($selected -ge $Options.Length-1) { 0 } else { $selected+1 }; Write-MenuOptions -Sel $selected }
+            elseif ($key.Key -eq "Enter") { return ($selected+1) }
+        } else {
+            try { [Console]::SetCursorPosition(0, ($optionsTopY + $Options.Length + 2)) } catch {}
+            $userInput = Read-Host ("Pilihan Anda (1-" + $Options.Length + ")")
+            if ($userInput -match ("^[1-" + $Options.Length + "]$")) { return [int]$userInput }
+            Write-MenuOptions -Sel $selected
+        }
+    } while ($true)
 }
 
 # ==================== MAIN EXECUTION FUNCTIONS ====================
 
 # Helper untuk jeda halus antar section laporan
-function Pause-ForSmoothness {
-	param([int]$Milliseconds = 800)
-	Start-Sleep -Milliseconds $Milliseconds
+function Start-ReportDelay {
+    param([int]$Milliseconds = 800)
+    Start-Sleep -Milliseconds $Milliseconds
 }
 
 # Helpers untuk layout agar header tetap persist
 $Global:ContentStartY = 0
 function Set-CursorToContentStart {
-	try { [Console]::SetCursorPosition(0, $Global:ContentStartY) } catch {}
+    try { [Console]::SetCursorPosition(0, $Global:ContentStartY) } catch {}
 }
 function Clear-ContentArea {
-	try {
-		$raw = $host.UI.RawUI
-		$width = $raw.BufferSize.Width
-		$height = $raw.BufferSize.Height
-		$rect = New-Object System.Management.Automation.Host.Rectangle 0, $Global:ContentStartY, ($width - 1), ($height - 1)
-		$raw.SetBufferContents($rect, ' ')
-		[Console]::SetCursorPosition(0, $Global:ContentStartY)
-	} catch {}
+    try {
+        $raw = $host.UI.RawUI
+        $width = $raw.BufferSize.Width
+        $height = $raw.BufferSize.Height
+        $rect = New-Object System.Management.Automation.Host.Rectangle 0, $Global:ContentStartY, ($width - 1), ($height - 1)
+        $raw.SetBufferContents($rect, ' ')
+        [Console]::SetCursorPosition(0, $Global:ContentStartY)
+    } catch {}
 }
 function Reset-ContentArea {
-	Clear-ContentArea
-	Set-CursorToContentStart
+    Clear-ContentArea
+    Set-CursorToContentStart
 }
 
 function Invoke-FullDiagnosis {
-	# Bersihkan layar; tidak menampilkan header di proses
-	Clear-Host
-	Write-ColorText "🔍 MEMULAI DIAGNOSIS LENGKAP..." -Color $Colors.Header
-	
-	# Collect system information
-	Show-LoadingBar -Text "Mengumpulkan informasi sistem" -Duration 2
-	$systemInfo = Get-SystemInfo
-	
-	# Detect Roblox
-	Show-LoadingBar -Text "Mendeteksi instalasi Roblox" -Duration 1
-	$robloxInfo = Get-RobloxInfo
-	
-	# Check system requirements
-	Show-LoadingBar -Text "Memeriksa persyaratan sistem" -Duration 1
-	$requirements = Test-SystemRequirements
-	
-	# Collect logs
-	Show-LoadingBar -Text "Mengumpulkan log Roblox" -Duration 1
-	$logInfo = Get-RobloxLogs
-	
-	# Test integrity and common issues
-	Show-LoadingBar -Text "Mendiagnosis masalah" -Duration 2
-	$integrityIssues = Test-RobloxIntegrity
-	$commonIssues = Test-CommonIssues
-	
-	# Tampilkan laporan tanpa header
-	Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
-	Pause-ForSmoothness
-	$hasIssues = Show-DiagnosisReport -IntegrityIssues $integrityIssues -CommonIssues $commonIssues -LogInfo $logInfo
-	
-	return @{
-		HasIssues = $hasIssues
-		IntegrityIssues = $integrityIssues
-		CommonIssues = $commonIssues
-		SystemInfo = $systemInfo
-		RobloxInfo = $robloxInfo
-	}
+    Clear-Host
+    Write-ColorText "🔍 MEMULAI DIAGNOSIS LENGKAP..." -Color $Colors.Header
+    
+    Show-LoadingBar -Text "Mengumpulkan informasi sistem" -Duration 2
+    $systemInfo = Get-SystemInfo
+    Show-LoadingBar -Text "Mendeteksi instalasi Roblox" -Duration 1
+    $robloxInfo = Get-RobloxInfo
+    Show-LoadingBar -Text "Memeriksa persyaratan sistem" -Duration 1
+    $requirements = Test-SystemRequirements
+    Show-LoadingBar -Text "Mengumpulkan log Roblox" -Duration 1
+    $logInfo = Get-RobloxLogs
+    Show-LoadingBar -Text "Mendiagnosis masalah" -Duration 2
+    $integrityIssues = Test-RobloxIntegrity
+    $commonIssues = Test-CommonIssues
+    $connectivity = Test-RobloxConnectivity
+    
+    Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo -Connectivity $connectivity
+    Start-ReportDelay
+    $hasIssues = Show-DiagnosisReport -IntegrityIssues $integrityIssues -CommonIssues $commonIssues -LogInfo $logInfo
+    
+    return @{ HasIssues = $hasIssues; IntegrityIssues = $integrityIssues; CommonIssues = $commonIssues; SystemInfo = $systemInfo; RobloxInfo = $robloxInfo }
 }
 
 function Invoke-AutoRepair {
@@ -1138,26 +1174,13 @@ function Invoke-AutoRepair {
     $isAdmin = Request-AdminRights
     $repairResults = @{}
     
-    # Repair processes
-    Show-LoadingBar -Text "Menutup proses bermasalah" -Duration 1
-    $repairResults["Proses"] = Repair-RobloxProcesses
-    
-    # Repair cache
-    Show-LoadingBar -Text "Membersihkan cache" -Duration 2
-    $repairResults["Cache"] = Repair-RobloxCache
-    
-    # Repair registry (admin required)
+    # Konfirmasi tiap tahap (non-intrusive)
+    $ans = Confirm-ActionEx "Tutup proses Roblox yang bermasalah?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Menutup proses bermasalah" -Duration 1; $repairResults["Proses"] = Repair-RobloxProcesses } else { $repairResults["Proses"] = 0 }
+    $ans = Confirm-ActionEx "Bersihkan cache Roblox?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Membersihkan cache" -Duration 2; $repairResults["Cache"] = Repair-RobloxCache } else { $repairResults["Cache"] = 0 }
     if ($isAdmin) {
-        Show-LoadingBar -Text "Memperbaiki registry" -Duration 1
-        $regResult = Repair-RobloxRegistry
-        $repairResults["Registry"] = if ($regResult) { 1 } else { 0 }
-    } else {
-        $repairResults["Registry"] = 0
-    }
-    
-    # Install missing dependencies
-    Show-LoadingBar -Text "Memeriksa dependensi" -Duration 1
-    $repairResults["Dependensi"] = Install-MissingDependencies
+        $ans = Confirm-ActionEx "Perbaiki registry Roblox (memerlukan admin)?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Memperbaiki registry" -Duration 1; $regResult = Repair-RobloxRegistry; $repairResults["Registry"] = if ($regResult) { 1 } else { 0 } } else { $repairResults["Registry"] = 0 }
+    } else { $repairResults["Registry"] = 0 }
+    $ans = Confirm-ActionEx "Cek dan sarankan dependensi (.NET/VC++)?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Memeriksa dependensi" -Duration 1; $repairResults["Dependensi"] = Install-MissingDependencies } else { $repairResults["Dependensi"] = 0 }
     
     Show-RepairSummary -RepairResults $repairResults
 }

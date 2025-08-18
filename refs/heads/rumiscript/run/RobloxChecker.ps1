@@ -835,8 +835,8 @@ function Show-RepairSummary {
         Write-ColorText "`n🎉 Total $totalFixed masalah berhasil diperbaiki!" -Color $Colors.Success
         Write-ColorText "💡 Silakan coba jalankan Roblox lagi." -Color $Colors.Info
     } else {
-        Write-ColorText "`n❓ Tidak ada perbaikan yang diperlukan." -Color $Colors.Info
-        Write-ColorText "💡 Jika masalah masih ada, coba restart komputer atau install ulang Roblox." -Color $Colors.Warning
+        Write-ColorText "`n❓ Kaga ada perbaikan yang diperlukan behjiir." -Color $Colors.Info
+        Write-ColorText "💡 Kalau masalah masih ada, coba restart komputer atau install ulang Roblox." -Color $Colors.Warning
     }
 }
 
