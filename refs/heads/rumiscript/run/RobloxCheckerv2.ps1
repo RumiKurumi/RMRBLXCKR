@@ -194,18 +194,20 @@ function Show-LoadingBar {
 
 # Contoh penggunaan efek ketik dan loading bar di header/menu/proses utama
 function Show-Header {
-    Clear-Host
-    $greeting = Get-TimeBasedGreeting
-    Write-TypewriterText "╔══════════════════════════════════════════════════════════════╗" $Colors.Header 2
-    Write-TypewriterText "║                                                              ║" $Colors.Header 2
-    Write-TypewriterText "║               🎮 ROBLOX CHECKER BY RUMI 🎮                   ║" $Colors.Header 2
-    Write-TypewriterText "║                    Version $Global:ScriptVersion                                   ║" $Colors.Header 2
-    Write-TypewriterText "║                                                              ║" $Colors.Header 2
-    Write-TypewriterText "╚══════════════════════════════════════════════════════════════╝" $Colors.Header 2
-    Write-Host ""
-    Write-TypewriterText $greeting $Colors.Info 5
-    Write-ColorText "Waktu: $(Get-Date -Format 'dddd, dd MMMM yyyy HH:mm:ss')" -Color $Colors.Info
-    Write-Host ""
+	Clear-Host
+	$greeting = Get-TimeBasedGreeting
+	Write-TypewriterText "╔══════════════════════════════════════════════════════════════╗" $Colors.Header 2
+	Write-TypewriterText "║                                                              ║" $Colors.Header 2
+	Write-TypewriterText "║               🎮 ROBLOX CHECKER BY RUMI 🎮                   ║" $Colors.Header 2
+	Write-TypewriterText "║                    Version $Global:ScriptVersion                                   ║" $Colors.Header 2
+	Write-TypewriterText "║                                                              ║" $Colors.Header 2
+	Write-TypewriterText "╚══════════════════════════════════════════════════════════════╝" $Colors.Header 2
+	Write-Host ""
+	Write-TypewriterText $greeting $Colors.Info 5
+	Write-ColorText "Waktu: $(Get-Date -Format 'dddd, dd MMMM yyyy HH:mm:ss')" -Color $Colors.Info
+	Write-Host ""
+	# Tandai posisi awal area konten di bawah header
+	try { $Global:ContentStartY = [Console]::CursorTop } catch { $Global:ContentStartY = 15 }
 }
 
 function Show-Menu {
@@ -968,86 +970,111 @@ function Show-Goodbye {
 # ==================== INTERACTIVE FUNCTIONS ====================
 
 function Show-ArrowMenu {
-    param(
-        [string[]]$Options,
-        [int]$Default = 0
-    )
-    $selected = $Default
-    $arrow = "➤"
-    do {
-        Clear-Host
-        Write-Host ""
-        Write-Host "🎯 PILIHAN TINDAKAN" -ForegroundColor DarkYellow
-        Write-Host "═══════════════════════════════════════" -ForegroundColor Gray
-        for ($i=0; $i -lt $Options.Length; $i++) {
-            if ($i -eq $selected) {
-                Write-Host ($arrow + " " + $Options[$i]) -ForegroundColor Black -BackgroundColor Yellow
-            } else {
-                Write-Host ("  " + $Options[$i]) -ForegroundColor DarkYellow
-            }
-        }
-        Write-Host ""
-        Write-Host "Gunakan panah atas/bawah, Enter untuk pilih. (Jika tidak bisa, ketik angka pilihan)" -ForegroundColor Gray
-        $key = $null
-        try {
-            $key = [System.Console]::ReadKey($true)
-        } catch {}
-        if ($key) {
-            if ($key.Key -eq "UpArrow") {
-                $selected = if ($selected -le 0) { $Options.Length-1 } else { $selected-1 }
-            } elseif ($key.Key -eq "DownArrow") {
-                $selected = if ($selected -ge $Options.Length-1) { 0 } else { $selected+1 }
-            } elseif ($key.Key -eq "Enter") {
-                return ($selected+1)
-            }
-        } else {
-            # Fallback: input angka
-            $userInput = Read-Host ("Pilihan Anda (1-" + $Options.Length + ")")
-            if ($userInput -match ("^[1-" + $Options.Length + "]$")) {
-                return [int]$userInput
-            }
-        }
-    } while ($true)
+	param(
+		[string[]]$Options,
+		[int]$Default = 0
+	)
+	$selected = $Default
+	$arrow = "➤"
+	$menuStaticLines = 4  # judul, separator, instruksi, spasi
+	do {
+		# Render menu di area konten tanpa menyentuh header
+		$menuHeight = $menuStaticLines + $Options.Length
+		Clear-ContentArea -Lines ($menuHeight + 5)
+		Set-CursorToContentStart
+		Write-Host ""
+		Write-Host "🎯 PILIHAN TINDAKAN" -ForegroundColor DarkYellow
+		Write-Host "═══════════════════════════════════════" -ForegroundColor Gray
+		for ($i=0; $i -lt $Options.Length; $i++) {
+			if ($i -eq $selected) {
+				Write-Host ($arrow + " " + $Options[$i]) -ForegroundColor Black -BackgroundColor Yellow
+			} else {
+				Write-Host ("  " + $Options[$i]) -ForegroundColor DarkYellow
+			}
+		}
+		Write-Host ""
+		Write-Host "Gunakan panah atas/bawah, Enter untuk pilih. (Jika tidak bisa, ketik angka pilihan)" -ForegroundColor Gray
+		$key = $null
+		try { $key = [System.Console]::ReadKey($true) } catch {}
+		if ($key) {
+			if ($key.Key -eq "UpArrow") {
+				$selected = if ($selected -le 0) { $Options.Length-1 } else { $selected-1 }
+			} elseif ($key.Key -eq "DownArrow") {
+				$selected = if ($selected -ge $Options.Length-1) { 0 } else { $selected+1 }
+			} elseif ($key.Key -eq "Enter") {
+				return ($selected+1)
+			}
+		} else {
+			# Fallback: input angka
+			$userInput = Read-Host ("Pilihan Anda (1-" + $Options.Length + ")")
+			if ($userInput -match ("^[1-" + $Options.Length + "]$")) { return [int]$userInput }
+		}
+	} while ($true)
 }
 
 # ==================== MAIN EXECUTION FUNCTIONS ====================
 
+# Helper untuk jeda halus antar section laporan
+function Pause-ForSmoothness {
+	param([int]$Milliseconds = 800)
+	Start-Sleep -Milliseconds $Milliseconds
+}
+
+# Helpers untuk layout agar header tetap persist
+$Global:ContentStartY = 0
+function Set-CursorToContentStart {
+	try { [Console]::SetCursorPosition(0, $Global:ContentStartY) } catch {}
+}
+function Clear-ContentArea {
+	param([int]$Lines = 80)
+	try {
+		$width = $host.UI.RawUI.WindowSize.Width
+		Set-CursorToContentStart
+		for ($i = 0; $i -lt $Lines; $i++) { Write-Host (' ' * ($width)) }
+		Set-CursorToContentStart
+	} catch {}
+}
+
 function Invoke-FullDiagnosis {
-    Write-ColorText "`n🔍 MEMULAI DIAGNOSIS LENGKAP..." -Color $Colors.Header
-    Write-Host ""
-    
-    # Collect system information
-    Show-LoadingBar -Text "Mengumpulkan informasi sistem" -Duration 2
-    $systemInfo = Get-SystemInfo
-    
-    # Detect Roblox
-    Show-LoadingBar -Text "Mendeteksi instalasi Roblox" -Duration 1
-    $robloxInfo = Get-RobloxInfo
-    
-    # Check system requirements
-    Show-LoadingBar -Text "Memeriksa persyaratan sistem" -Duration 1
-    $requirements = Test-SystemRequirements
-    
-    # Collect logs
-    Show-LoadingBar -Text "Mengumpulkan log Roblox" -Duration 1
-    $logInfo = Get-RobloxLogs
-    
-    # Test integrity and common issues
-    Show-LoadingBar -Text "Mendiagnosis masalah" -Duration 2
-    $integrityIssues = Test-RobloxIntegrity
-    $commonIssues = Test-CommonIssues
-    
-    # Show reports
-    Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
-    $hasIssues = Show-DiagnosisReport -IntegrityIssues $integrityIssues -CommonIssues $commonIssues -LogInfo $logInfo
-    
-    return @{
-        HasIssues = $hasIssues
-        IntegrityIssues = $integrityIssues
-        CommonIssues = $commonIssues
-        SystemInfo = $systemInfo
-        RobloxInfo = $robloxInfo
-    }
+	Write-ColorText "`n🔍 MEMULAI DIAGNOSIS LENGKAP..." -Color $Colors.Header
+	Write-Host ""
+	# Pastikan area konten bersih sebelum proses
+	Clear-ContentArea -Lines 120
+	Set-CursorToContentStart
+	
+	# Collect system information
+	Show-LoadingBar -Text "Mengumpulkan informasi sistem" -Duration 2
+	$systemInfo = Get-SystemInfo
+	
+	# Detect Roblox
+	Show-LoadingBar -Text "Mendeteksi instalasi Roblox" -Duration 1
+	$robloxInfo = Get-RobloxInfo
+	
+	# Check system requirements
+	Show-LoadingBar -Text "Memeriksa persyaratan sistem" -Duration 1
+	$requirements = Test-SystemRequirements
+	
+	# Collect logs
+	Show-LoadingBar -Text "Mengumpulkan log Roblox" -Duration 1
+	$logInfo = Get-RobloxLogs
+	
+	# Test integrity and common issues
+	Show-LoadingBar -Text "Mendiagnosis masalah" -Duration 2
+	$integrityIssues = Test-RobloxIntegrity
+	$commonIssues = Test-CommonIssues
+	
+	# Show reports per section dengan jeda
+	Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
+	Pause-ForSmoothness
+	$hasIssues = Show-DiagnosisReport -IntegrityIssues $integrityIssues -CommonIssues $commonIssues -LogInfo $logInfo
+	
+	return @{
+		HasIssues = $hasIssues
+		IntegrityIssues = $integrityIssues
+		CommonIssues = $commonIssues
+		SystemInfo = $systemInfo
+		RobloxInfo = $robloxInfo
+	}
 }
 
 function Invoke-AutoRepair {
@@ -1122,85 +1149,67 @@ function Register-CleanupHandlers {
 # ==================== MAIN SCRIPT EXECUTION ====================
 
 function Main {
-    try {
-        # Initialize environment
-        Initialize-Environment
-        Register-CleanupHandlers
-        
-        # Set execution policy temporarily
-        $originalPolicy = Set-ExecutionPolicyTemporary
-        
-        # Show header
-        Show-Header
-        
-        # Main interactive loop
-        do {
-            $menuOptions = @(
-                "🔍 Diagnosis Lengkap (Recommended)",
-                "🔧 Perbaikan Otomatis",
-                "📊 Lihat Laporan Sistem",
-                "🧹 Bersihkan Cache Saja",
-                "❌ Keluar"
-            )
-            $choice = Show-ArrowMenu -Options $menuOptions
-            
-            switch ($choice) {
-                1 {
-                    try {
-                        $diagnosisResults = Invoke-FullDiagnosis
-                    } catch {
-                        Write-ColorText "❌ Diagnosis gagal: $($_.Exception.Message)" -Color $Colors.Error
-                    }
-                }
-                2 {
-                    try {
-                        Write-ColorText "🔍 Menjalankan diagnosis cepat..." -Color $Colors.Info
-                        $diagnosisResults = Invoke-FullDiagnosis
-                        Invoke-AutoRepair -DiagnosisResults $diagnosisResults
-                    } catch {
-                        Write-ColorText "❌ Perbaikan gagal: $($_.Exception.Message)" -Color $Colors.Error
-                    }
-                }
-                3 {
-                    try {
-                        $systemInfo = Get-SystemInfo
-                        $robloxInfo = Get-RobloxInfo
-                        $requirements = Test-SystemRequirements
-                        $logInfo = Get-RobloxLogs
-                        Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
-                    } catch {
-                        Write-ColorText "❌ Gagal menampilkan laporan: $($_.Exception.Message)" -Color $Colors.Error
-                    }
-                }
-                4 { Invoke-CacheCleanOnly }
-                5 { break }
-            }
-            
-            if ($choice -ne 5) {
-                Write-Host ""
-                Write-ColorText "Tekan Enter untuk kembali ke menu..." -Color $Colors.Accent
-                Read-Host | Out-Null
-                Show-Header
-            }
-            
-        } while ($choice -ne 5)
-        
-    } catch {
-        Write-LogEntry "Unexpected error in main execution: $($_.Exception.Message)" "ERROR"
-        Write-ColorText "❌ Terjadi kesalahan tak terduga: $($_.Exception.Message)" -Color $Colors.Error
-        Write-ColorText "📄 Periksa log file untuk detail: $Global:LogFile" -Color $Colors.Info
-    } finally {
-        # Cleanup and goodbye
-        Invoke-SafetyCleanup
-        
-        # Restore execution policy
-        if ($originalPolicy) {
-            Restore-ExecutionPolicy -OriginalPolicy $originalPolicy
-        }
-        
-        Write-LogEntry "=== ROBLOX CHECKER SESSION ENDED ===" "INFO"
-        Show-Goodbye
-    }
+	try {
+		Initialize-Environment
+		Register-CleanupHandlers
+		$originalPolicy = Set-ExecutionPolicyTemporary
+		Show-Header
+		
+		do {
+			$menuOptions = @(
+				"🔍 Diagnosis Lengkap (Recommended)",
+				"🔧 Perbaikan Otomatis",
+				"📊 Lihat Laporan Sistem",
+				"🧹 Bersihkan Cache Saja",
+				"❌ Keluar"
+			)
+			$choice = Show-ArrowMenu -Options $menuOptions
+			
+			switch ($choice) {
+				1 {
+					try { $diagnosisResults = Invoke-FullDiagnosis } catch { Write-ColorText "❌ Diagnosis gagal: $($_.Exception.Message)" -Color $Colors.Error }
+				}
+				2 {
+					try {
+						Clear-ContentArea -Lines 120; Set-CursorToContentStart
+						Write-ColorText "🔍 Menjalankan diagnosis cepat..." -Color $Colors.Info
+						$diagnosisResults = Invoke-FullDiagnosis
+						Invoke-AutoRepair -DiagnosisResults $diagnosisResults
+					} catch { Write-ColorText "❌ Perbaikan gagal: $($_.Exception.Message)" -Color $Colors.Error }
+				}
+				3 {
+					try {
+						Clear-ContentArea -Lines 120; Set-CursorToContentStart
+						$systemInfo = Get-SystemInfo
+						$robloxInfo = Get-RobloxInfo
+						$requirements = Test-SystemRequirements
+						$logInfo = Get-RobloxLogs
+						Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
+						Pause-ForSmoothness
+					} catch { Write-ColorText "❌ Gagal menampilkan laporan: $($_.Exception.Message)" -Color $Colors.Error }
+				}
+				4 { Clear-ContentArea -Lines 120; Set-CursorToContentStart; Invoke-CacheCleanOnly }
+				5 { break }
+			}
+			
+			if ($choice -ne 5) {
+				Write-Host ""
+				Write-ColorText "Tekan Enter untuk kembali ke menu..." -Color $Colors.Accent
+				Read-Host | Out-Null
+			}
+			
+		} while ($choice -ne 5)
+		
+	} catch {
+		Write-LogEntry "Unexpected error in main execution: $($_.Exception.Message)" "ERROR"
+		Write-ColorText "❌ Terjadi kesalahan tak terduga: $($_.Exception.Message)" -Color $Colors.Error
+		Write-ColorText "📄 Periksa log file untuk detail: $Global:LogFile" -Color $Colors.Info
+	} finally {
+		Invoke-SafetyCleanup
+		if ($originalPolicy) { Restore-ExecutionPolicy -OriginalPolicy $originalPolicy }
+		Write-LogEntry "=== ROBLOX CHECKER SESSION ENDED ===" "INFO"
+		Show-Goodbye
+	}
 }
 
 # ==================== SCRIPT ENTRY POINT ====================
