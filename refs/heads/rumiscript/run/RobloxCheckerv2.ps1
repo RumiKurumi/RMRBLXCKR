@@ -241,9 +241,11 @@ function Confirm-ActionEx {
     do {
         $response = Read-Host
         if ($response -match '^[YyNnSs]$') {
-            if ($response -match '^[Yy]$') { return 'Yes' }
-            if ($response -match '^[Nn]$') { return 'No' }
-            return 'Skip'
+            $ret = 'Skip'
+            if ($response -match '^[Yy]$') { $ret = 'Yes' }
+            elseif ($response -match '^[Nn]$') { $ret = 'No' }
+            Write-LogEntry ("UserPrompt: '" + $Message + "' -> " + $ret) "INFO"
+            return $ret
         } else {
             Write-ColorText "❌ Jawab dengan Y, N, atau S: " -Color $Colors.Error -NoNewLine
         }
@@ -969,6 +971,7 @@ function Install-CloudflareWARP {
         $det = Test-CloudflareWARPInstalled
         if ($det -and $det.Installed) {
             Write-ColorText "✅ Cloudflare WARP sudah terpasang. Melewati download/install." -Color $Colors.Success
+            Write-LogEntry ("WARP already installed. Version=" + $det.Version + ", Path=" + $det.Path) "INFO"
             return @{ Installed = $true; Method = 'AlreadyInstalled'; File = $null; ExitCode = 0; Version = $det.Version; Path = $det.Path }
         }
     } catch {}
@@ -1061,6 +1064,7 @@ function Invoke-NetworkSafePacket {
 			$proc = Start-Process netsh -ArgumentList "winsock reset" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
 			$results.WinsockReset = if ($proc) { $proc.ExitCode } else { 0 }
 			Write-LogEntry "netsh winsock reset exitCode=$($results.WinsockReset)" "INFO"
+			Write-ColorText "ℹ️ Perubahan Winsock akan berlaku setelah restart. Disarankan untuk me-restart perangkat." -Color $Colors.Warning
 		} else { $results.WinsockReset = 'Skipped' }
 	} catch { $results.WinsockReset = -1; Write-LogEntry "Failed to reset Winsock: $($_.Exception.Message)" "ERROR" }
 
@@ -1082,14 +1086,19 @@ function Show-NetworkPacketReport {
 	
 	if ($PacketResults) {
 		Write-ColorText "• Flush DNS: $($PacketResults.FlushDNS)" -Color $Colors.Info
+		Write-LogEntry ("Report: FlushDNS=" + $PacketResults.FlushDNS) "INFO"
 		Write-ColorText "• Reset WinHTTP Proxy: $($PacketResults.ResetWinHttpProxy)" -Color $Colors.Info
+		Write-LogEntry ("Report: ResetWinHTTPProxy=" + $PacketResults.ResetWinHttpProxy) "INFO"
 		Write-ColorText "• Winsock Reset: $($PacketResults.WinsockReset)" -Color $Colors.Info
+		Write-LogEntry ("Report: WinsockReset=" + $PacketResults.WinsockReset) "INFO"
 		Write-ColorText "• Cache Roblox dibersihkan (lokasi): $($PacketResults.CacheCleaned)" -Color $Colors.Info
+		Write-LogEntry ("Report: CacheCleanedLocations=" + $PacketResults.CacheCleaned) "INFO"
 	}
 	
 	if ($WarpInstallResult) {
 		$warpStatus = if ($WarpInstallResult.Installed) { 'Terpasang' } else { 'Gagal/Skip' }
 		Write-ColorText "• Cloudflare WARP: $warpStatus (method=$($WarpInstallResult.Method), code=$($WarpInstallResult.ExitCode))" -Color $Colors.Info
+		Write-LogEntry ("Report: WARP status=" + $warpStatus + ", method=" + $WarpInstallResult.Method + ", code=" + $WarpInstallResult.ExitCode) "INFO"
 	}
 	
 	Write-ColorText "`n🔎 Port 5051" -Color $Colors.Header
@@ -1099,8 +1108,10 @@ function Show-NetworkPacketReport {
 			Write-ColorText ("• PID $($i.PID) - $($i.ProcessName) " + (if ($i.MainModule) { "($($i.MainModule))" } else { "" })) -Color $Colors.Warning
 			Write-LogEntry "Port5051 in use by PID=$($i.PID) Name=$($i.ProcessName) Path=$($i.MainModule)" "INFO"
 		}
+		Write-LogEntry ("Report: Port5051Count=" + $PacketResults.Port5051.Count) "INFO"
 	} else {
 		Write-ColorText "• Tidak ada proses yang menggunakan port 5051" -Color $Colors.Success
+		Write-LogEntry "Report: Port5051Count=0" "INFO"
 	}
 	
 	Write-ColorText "`n🧪 Deteksi Aplikasi Berpotensi Konflik (Hyperion/Anti-cheat)" -Color $Colors.Header
@@ -1112,6 +1123,7 @@ function Show-NetworkPacketReport {
 				Write-ColorText ("   - $($p.Name) (PID $($p.Id))") -Color $Colors.Info
 				Write-LogEntry "Conflict process: $($p.Name) PID=$($p.Id)" "WARNING"
 			}
+			Write-LogEntry ("Report: ConflictRunningProcesses=" + ($ConflictingApps.RunningProcesses | Select-Object -ExpandProperty Name | Sort-Object -Unique -Join ',')) "INFO"
 		} else { Write-ColorText "• Tidak ada proses konflik yang terdeteksi saat ini" -Color $Colors.Success }
 		
 		if ($ConflictingApps.InstalledApps.Count -gt 0) {
@@ -1119,12 +1131,14 @@ function Show-NetworkPacketReport {
 			foreach ($a in $ConflictingApps.InstalledApps | Sort-Object Name -Unique) {
 				Write-ColorText ("   - $($a.Name) $($a.Version)") -Color $Colors.Info
 			}
+			Write-LogEntry ("Report: ConflictInstalledAppsCount=" + $ConflictingApps.InstalledApps.Count) "INFO"
 		}
 		if ($ConflictingApps.Services.Count -gt 0) {
 			Write-ColorText "• Services terkait:" -Color $Colors.Warning
 			foreach ($s in $ConflictingApps.Services | Sort-Object Name -Unique) {
 				Write-ColorText ("   - $($s.Name) ($($s.Status))") -Color $Colors.Info
 			}
+			Write-LogEntry ("Report: ConflictServicesCount=" + $ConflictingApps.Services.Count) "INFO"
 		}
 	}
 	
@@ -1176,6 +1190,7 @@ function Invoke-NetworkAndStabilityFix {
 		if ($ans -eq 'Yes') {
 			try { $p = Start-Process netsh -ArgumentList "winsock reset" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue; $packet.WinsockReset = if ($p){$p.ExitCode}else{0} } catch { $packet.WinsockReset = -1 }
 			Write-LogEntry "Step WinsockReset exitCode=$($packet.WinsockReset)" "INFO"
+			Write-ColorText "ℹ️ Perubahan Winsock akan berlaku setelah restart. Disarankan untuk me-restart perangkat." -Color $Colors.Warning
 		} else { $packet.WinsockReset = 'Skipped' }
 
 		# Clean cache dengan backup
@@ -1227,6 +1242,12 @@ function Show-SystemReport {
     
     Write-ColorText "`n📋 LAPORAN SISTEM" -Color $Colors.Header
     Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+    try {
+        $os = if ($SystemInfo) { $SystemInfo.OSName } else { $null }
+        $gpu = if ($SystemInfo) { $SystemInfo.GPUName } else { $null }
+        $ver = if ($RobloxInfo) { $RobloxInfo.Version } else { $null }
+        Write-LogEntry ("SystemReport: OS='" + $os + "' GPU='" + $gpu + "' RobloxVersion='" + $ver + "'") "INFO"
+    } catch {}
     
     if ($SystemInfo) {
         Write-ColorText "🖥️  Sistem Operasi: " -Color $Colors.Info -NoNewLine
@@ -1285,6 +1306,7 @@ function Show-SystemReport {
         Write-ColorText ("Ping roblox.com: $pingStatus") -Color $Colors.Info
         Write-ColorText ("HTTP www.roblox.com: $mainStatus") -Color $Colors.Info
         Write-ColorText ("HTTP apis.roblox.com: $apiStatus") -Color $Colors.Info
+        try { Write-LogEntry ("ConnectivityReport: Ping=" + $Connectivity.PingOk + ", Main=" + $Connectivity.HttpOkMain + ", Api=" + $Connectivity.HttpOkApi) "INFO" } catch {}
     }
     
     if ($LogInfo.Found) {
@@ -1317,6 +1339,7 @@ function Show-DiagnosisReport {
     if ($totalIssues -eq 0 -and $LogInfo.ErrorSummary.Count -eq 0) {
         Write-ColorText "✅ Tidak ditemukan masalah!" -Color $Colors.Success
         Write-ColorText "   Roblox seharusnya berjalan dengan normal." -Color $Colors.Info
+        Write-LogEntry "DiagnosisReport: No issues found" "INFO"
         return $false
     }
     Start-ReportDelay
@@ -1328,6 +1351,7 @@ function Show-DiagnosisReport {
         foreach ($issue in $IntegrityIssues) {
             Write-ColorText "   • $issue" -Color $Colors.Error
         }
+        Write-LogEntry ("DiagnosisReport: IntegrityIssuesCount=" + $IntegrityIssues.Count) "INFO"
         Start-ReportDelay
     }
     if ($CommonIssues.Count -gt 0) {
@@ -1335,6 +1359,7 @@ function Show-DiagnosisReport {
         foreach ($issue in $CommonIssues) {
             Write-ColorText "   • $issue" -Color $Colors.Warning
         }
+        Write-LogEntry ("DiagnosisReport: CommonIssuesCount=" + $CommonIssues.Count) "INFO"
         Start-ReportDelay
     }
     if ($LogInfo.ErrorSummary.Count -gt 0) {
@@ -1343,6 +1368,7 @@ function Show-DiagnosisReport {
         for ($i=0; $i -lt $maxShow; $i++) {
             Write-ColorText "   • $($LogInfo.ErrorSummary[$i])" -Color $Colors.Error
         }
+        Write-LogEntry ("DiagnosisReport: ErrorSummaryShown=" + $maxShow + "/" + $LogInfo.ErrorSummary.Count) "INFO"
         if ($LogInfo.ErrorSummary.Count -gt $maxShow) {
             Write-ColorText "   ...dan $($LogInfo.ErrorSummary.Count - $maxShow) error/crash lain. Lihat log lengkap di folder log." -Color $Colors.Warning
         }
@@ -1355,6 +1381,7 @@ function Show-RepairSummary {
     
     Write-ColorText "`n🔨 HASIL PERBAIKAN" -Color $Colors.Header
     Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+    try { Write-LogEntry ("RepairSummary: " + ($RepairResults | ConvertTo-Json -Compress)) "INFO" } catch {}
     
     $totalFixed = 0
     foreach ($result in $RepairResults.GetEnumerator()) {
@@ -1661,6 +1688,13 @@ function Invoke-AutoRepair {
 	}
 	
 	Show-RepairSummary -RepairResults $repairResults
+	Write-LogEntry "AutoRepair: started" "INFO"
+
+	try {
+		$fixed = 0
+		foreach ($kv in $repairResults.GetEnumerator()) { if ($kv.Value -is [int]) { $fixed += [math]::Max(0, $kv.Value) } }
+		Write-LogEntry ("AutoRepair: completed TotalFixed=" + $fixed + ", Detail=" + ($repairResults | ConvertTo-Json -Compress)) "INFO"
+	} catch {}
 }
 
 function Invoke-CacheCleanOnly {
@@ -1701,6 +1735,7 @@ function Main {
 		Initialize-Environment
 		Register-CleanupHandlers
 		$originalPolicy = Set-ExecutionPolicyTemporary
+		Write-LogEntry "Main menu started" "INFO"
 		
 		do {
 			$menuOptions = @(
@@ -1723,7 +1758,7 @@ function Main {
 					} catch { Write-ColorText "❌ Perbaikan gagal: $($_.Exception.Message)" -Color $Colors.Error }
 				}
 				3 { Clear-Host; Invoke-CacheCleanOnly }
-				4 { try { Invoke-NetworkAndStabilityFix } catch { Write-ColorText "❌ Gagal menjalankan paket jaringan: $($_.Exception.Message)" -Color $Colors.Error } }
+				4 { try { Write-LogEntry "Launching NetworkAndStabilityFix" "INFO"; Invoke-NetworkAndStabilityFix } catch { Write-ColorText "❌ Gagal menjalankan paket jaringan: $($_.Exception.Message)" -Color $Colors.Error; Write-LogEntry ("NetworkAndStabilityFix failed: " + $_.Exception.Message) "ERROR" } }
 				5 { break }
 			}
 			
@@ -1734,12 +1769,18 @@ function Main {
 			}
 			
 		} while ($choice -ne 5)
+		Write-LogEntry "Main menu exited" "INFO"
 		
 	} catch {
 		Write-LogEntry "Unexpected error in main execution: $($_.Exception.Message)" "ERROR"
 		Write-ColorText "❌ Terjadi kesalahan tak terduga: $($_.Exception.Message)" -Color $Colors.Error
 		Write-ColorText "📄 Periksa log file untuk detail: $Global:LogFile" -Color $Colors.Info
 	} finally {
+		# Animasi cleaning up sebelum keluar
+		try {
+			Write-ColorText "\n🧹 Membersihkan sisa-sisa sementara..." -Color $Colors.Header
+			Show-LoadingSpinner -Text "Cleaning up" -Duration 2
+		} catch {}
 		Invoke-SafetyCleanup
 		if ($originalPolicy) { Restore-ExecutionPolicy -OriginalPolicy $originalPolicy }
 		Write-LogEntry "=== ROBLOX CHECKER SESSION ENDED ===" "INFO"
