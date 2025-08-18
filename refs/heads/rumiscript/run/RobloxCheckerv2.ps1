@@ -1201,7 +1201,7 @@ function Invoke-NetworkAndStabilityFix {
 function Invoke-SafePacketOnly {
 	param([switch]$YesToAll)
 	Clear-Host
-	Write-ColorText "🔒 MEMULAI: Paket Jaringan Aman saja" -Color $Colors.Header
+	Write-ColorText "🔒 MEMULAI: Safe Net Packet saja" -Color $Colors.Header
 	$packet = Invoke-NetworkSafePacket -YesToAll:$YesToAll
 	Show-NetworkPacketReport -PacketResults $packet -WarpInstallResult $null -ConflictingApps $null
 }
@@ -1707,7 +1707,7 @@ function Main {
 				"🔍 Diagnosis Lengkap (Recommended)",
 				"🔧 Perbaikan Otomatis",
 				"🧹 Bersihkan Cache Saja",
-				"🛠️ Paket Jaringan Aman + WARP + Cek Konflik",
+				"🛠️ Safe Net Packet + WARP + Cek Konflik",
 				"❌ Keluar"
 			)
 			$choice = Show-ArrowMenu -Options $menuOptions
