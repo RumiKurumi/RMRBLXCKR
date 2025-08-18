@@ -1163,29 +1163,75 @@ function Invoke-FullDiagnosis {
     return @{ HasIssues = $hasIssues; IntegrityIssues = $integrityIssues; CommonIssues = $commonIssues; SystemInfo = $systemInfo; RobloxInfo = $robloxInfo }
 }
 
+# Tampilkan rencana perbaikan berdasarkan diagnosis
+function Show-RepairPlan {
+	param($DiagnosisResults, [bool]$IsAdmin)
+	Write-ColorText "`n🧭 RENCANA PERBAIKAN" -Color $Colors.Header
+	Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+	Write-ColorText "1) Tutup proses Roblox yang bermasalah" -Color $Colors.Info
+	Write-ColorText "2) Bersihkan cache Roblox (aman)" -Color $Colors.Info
+	if ($IsAdmin) { Write-ColorText "3) Perbaiki registry Roblox (memerlukan admin)" -Color $Colors.Info }
+	Write-ColorText ("" + (if ($IsAdmin) { "4" } else { "3" }) + ") Cek & sarankan dependensi (.NET/VC++)") -Color $Colors.Info
+}
+
+# Pilih mode perbaikan
+function Select-RepairMode {
+	Write-ColorText "`nPilih mode perbaikan: (A=Ya untuk semua / S=Step-by-step / B=Batalkan): " -Color $Colors.Warning -NoNewLine
+	do {
+		$resp = Read-Host
+		if ($resp -match '^[AaSsBb]$') {
+			if ($resp -match '^[Aa]$') { return 'All' }
+			if ($resp -match '^[Ss]$') { return 'Step' }
+			return 'Cancel'
+		} else {
+			Write-ColorText "❌ Jawab dengan A, S, atau B: " -Color $Colors.Error -NoNewLine
+		}
+	} while ($true)
+}
+
 function Invoke-AutoRepair {
-    param($DiagnosisResults)
-    
-    Write-ColorText "`n🔧 MEMULAI PERBAIKAN OTOMATIS..." -Color $Colors.Header
-    Write-Host ""
-    
-    if (-not $DiagnosisResults.HasIssues) {
-        Write-ColorText "ℹ️ Tidak ada masalah yang terdeteksi untuk diperbaiki." -Color $Colors.Info
-        return
-    }
-    
-    $isAdmin = Request-AdminRights
-    $repairResults = @{}
-    
-    # Konfirmasi tiap tahap (non-intrusive)
-    $ans = Confirm-ActionEx "Tutup proses Roblox yang bermasalah?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Menutup proses bermasalah" -Duration 1; $repairResults["Proses"] = Repair-RobloxProcesses } else { $repairResults["Proses"] = 0 }
-    $ans = Confirm-ActionEx "Bersihkan cache Roblox?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Membersihkan cache" -Duration 2; $repairResults["Cache"] = Repair-RobloxCache } else { $repairResults["Cache"] = 0 }
-    if ($isAdmin) {
-        $ans = Confirm-ActionEx "Perbaiki registry Roblox (memerlukan admin)?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Memperbaiki registry" -Duration 1; $regResult = Repair-RobloxRegistry; $repairResults["Registry"] = if ($regResult) { 1 } else { 0 } } else { $repairResults["Registry"] = 0 }
-    } else { $repairResults["Registry"] = 0 }
-    $ans = Confirm-ActionEx "Cek dan sarankan dependensi (.NET/VC++)?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Memeriksa dependensi" -Duration 1; $repairResults["Dependensi"] = Install-MissingDependencies } else { $repairResults["Dependensi"] = 0 }
-    
-    Show-RepairSummary -RepairResults $repairResults
+	param($DiagnosisResults)
+	
+	Write-ColorText "`n🔧 MEMULAI PERBAIKAN OTOMATIS..." -Color $Colors.Header
+	Write-Host ""
+	
+	if (-not $DiagnosisResults.HasIssues) {
+		Write-ColorText "ℹ️ Tidak ada masalah yang terdeteksi untuk diperbaiki." -Color $Colors.Info
+		return
+	}
+	
+	$isAdmin = Request-AdminRights
+	$repairResults = @{}
+
+	# Tampilkan rencana perbaikan dan pilih mode
+	Show-RepairPlan -DiagnosisResults $DiagnosisResults -IsAdmin $isAdmin
+	$mode = Select-RepairMode
+	if ($mode -eq 'Cancel') { Write-ColorText "⏭️ Dibatalkan oleh pengguna." -Color $Colors.Warning; return }
+
+	if ($mode -eq 'All') {
+		# Jalankan semua langkah tanpa prompt per-langkah
+		Show-LoadingBar -Text "Menutup proses bermasalah" -Duration 1
+		$repairResults["Proses"] = Repair-RobloxProcesses
+		Show-LoadingBar -Text "Membersihkan cache" -Duration 2
+		$repairResults["Cache"] = Repair-RobloxCache
+		if ($isAdmin) {
+			Show-LoadingBar -Text "Memperbaiki registry" -Duration 1
+			$regResult = Repair-RobloxRegistry
+			$repairResults["Registry"] = if ($regResult) { 1 } else { 0 }
+		} else { $repairResults["Registry"] = 0 }
+		Show-LoadingBar -Text "Memeriksa dependensi" -Duration 1
+		$repairResults["Dependensi"] = Install-MissingDependencies
+	} else {
+		# Step-by-step dengan Y/N/Skip
+		$ans = Confirm-ActionEx "Tutup proses Roblox yang bermasalah?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Menutup proses bermasalah" -Duration 1; $repairResults["Proses"] = Repair-RobloxProcesses } else { $repairResults["Proses"] = 0 }
+		$ans = Confirm-ActionEx "Bersihkan cache Roblox?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Membersihkan cache" -Duration 2; $repairResults["Cache"] = Repair-RobloxCache } else { $repairResults["Cache"] = 0 }
+		if ($isAdmin) {
+			$ans = Confirm-ActionEx "Perbaiki registry Roblox (memerlukan admin)?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Memperbaiki registry" -Duration 1; $regResult = Repair-RobloxRegistry; $repairResults["Registry"] = if ($regResult) { 1 } else { 0 } } else { $repairResults["Registry"] = 0 }
+		} else { $repairResults["Registry"] = 0 }
+		$ans = Confirm-ActionEx "Cek dan sarankan dependensi (.NET/VC++)?"; if ($ans -eq 'Yes') { Show-LoadingBar -Text "Memeriksa dependensi" -Duration 1; $repairResults["Dependensi"] = Install-MissingDependencies } else { $repairResults["Dependensi"] = 0 }
+	}
+	
+	Show-RepairSummary -RepairResults $repairResults
 }
 
 function Invoke-CacheCleanOnly {
