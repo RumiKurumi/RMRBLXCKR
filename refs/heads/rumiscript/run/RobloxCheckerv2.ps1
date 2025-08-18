@@ -125,27 +125,42 @@ function Get-TimeBasedGreeting {
 }
 
 function Initialize-Environment {
-    Write-LogEntry "Initializing Roblox Checker environment" "INFO"
-    
-    # Create log directory
-    if (-not (Test-Path $LogPath)) {
-        try {
-            New-Item -Path $LogPath -ItemType Directory -Force | Out-Null
-            Write-LogEntry "Created log directory: $LogPath" "INFO"
-        } catch {
-            Write-ColorText "⚠️ Tidak dapat membuat folder log: $($_.Exception.Message)" -Color $Colors.Warning
-        }
-    }
-    
-    # Set log file path
-    $Global:LogFile = Join-Path $LogPath "RobloxChecker_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-    
-    # Log system info
-    Write-LogEntry "=== ROBLOX CHECKER SESSION STARTED ===" "INFO"
-    Write-LogEntry "Script Version: $Global:ScriptVersion" "INFO"
-    Write-LogEntry "Computer: $env:COMPUTERNAME" "INFO"
-    Write-LogEntry "User: $env:USERNAME" "INFO"
-    Write-LogEntry "OS: $(Get-WmiObject Win32_OperatingSystem | Select-Object -ExpandProperty Caption)" "INFO"
+	Write-LogEntry "Initializing Roblox Checker environment" "INFO"
+	
+	# Tentukan folder log di Desktop (logschecker) jika tidak ditentukan
+	try {
+		$desktopPath = [Environment]::GetFolderPath('Desktop')
+		$preferredLogPath = Join-Path $desktopPath 'logschecker'
+		# Jika user tidak mengatur LogPath atau masih default lama (TEMP), pakai Desktop\logschecker
+		if (-not $LogPath -or $LogPath -eq "$env:TEMP\RobloxChecker") {
+			$script:LogPath = $preferredLogPath
+		} else {
+			$script:LogPath = $LogPath
+		}
+	} catch {
+		# Fallback ke TEMP jika terjadi error
+		$script:LogPath = "$env:TEMP\RobloxChecker"
+	}
+	
+	# Create log directory
+	if (-not (Test-Path $script:LogPath)) {
+		try {
+			New-Item -Path $script:LogPath -ItemType Directory -Force | Out-Null
+			Write-LogEntry "Created log directory: $script:LogPath" "INFO"
+		} catch {
+			Write-ColorText "⚠️ Tidak dapat membuat folder log: $($_.Exception.Message)" -Color $Colors.Warning
+		}
+	}
+	
+	# Set log file path
+	$Global:LogFile = Join-Path $script:LogPath "RobloxChecker_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+	
+	# Log system info
+	Write-LogEntry "=== ROBLOX CHECKER SESSION STARTED ===" "INFO"
+	Write-LogEntry "Script Version: $Global:ScriptVersion" "INFO"
+	Write-LogEntry "Computer: $env:COMPUTERNAME" "INFO"
+	Write-LogEntry "User: $env:USERNAME" "INFO"
+	Write-LogEntry "OS: $((Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption)" "INFO"
 }
 
 function Write-TypewriterText {
@@ -264,72 +279,71 @@ function Get-SystemInfo {
 }
 
 function Get-RobloxInfo {
-    Write-LogEntry "Detecting Roblox installation" "INFO"
-    Show-ProgressBar -Activity "Mendeteksi Roblox" -Status "Mencari instalasi Roblox..." -PercentComplete 30
-    
-    $robloxInfo = @{
-        IsInstalled = $false
-        InstallPath = ""
-        ExecutablePath = ""
-        Version = ""
-        IsRunning = $false
-        ProcessCount = 0
-        InstallDate = ""
-        Size = 0
-    }
-    
-    $possiblePaths = @(
-        "$env:LOCALAPPDATA\Roblox",
-        "$env:PROGRAMFILES\Roblox",
-        "$env:PROGRAMFILES(X86)\Roblox",
-        "$env:APPDATA\Roblox"
-    )
-    foreach ($path in $possiblePaths) {
-        if (Test-Path $path) {
-            $robloxInfo.InstallPath = $path
-            Write-LogEntry "Found Roblox installation at: $path" "INFO"
-            break
-        }
-    }
-    
-    if ($robloxInfo.InstallPath) {
-        $exePaths = @(
-            "$($robloxInfo.InstallPath)\RobloxPlayerLauncher.exe",
-            "$($robloxInfo.InstallPath)\Versions\*\RobloxPlayerBeta.exe"
-        )
-        foreach ($exePath in $exePaths) {
-            $foundExe = Get-ChildItem $exePath -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($foundExe) {
-                $robloxInfo.ExecutablePath = $foundExe.FullName
-                $robloxInfo.IsInstalled = $true
-                try {
-                    $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($foundExe.FullName)
-                    $robloxInfo.Version = $versionInfo.ProductVersion
-                } catch { $robloxInfo.Version = "Unknown" }
-                $robloxInfo.InstallDate = $foundExe.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")
-                break
-            }
-        }
-    }
-    
-    # Check running processes (fast)
-    $robloxProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like "*Roblox*" }
-    $robloxInfo.ProcessCount = $robloxProcesses.Count
-    $robloxInfo.IsRunning = $robloxProcesses.Count -gt 0
-    
-    # Calculate total size (batasi recursive untuk hindari hang)
-    if ($robloxInfo.InstallPath -and (Test-Path $robloxInfo.InstallPath)) {
-        try {
-            $items = Get-ChildItem -Path $robloxInfo.InstallPath -Recurse -File -ErrorAction SilentlyContinue -Force
-            # Batasi hingga 50.000 file untuk menghindari hang di volume besar
-            $items = $items | Select-Object -First 50000
-            $totalSize = ($items | Measure-Object -Property Length -Sum).Sum
-            $robloxInfo.Size = [math]::Round(($totalSize) / 1MB, 2)
-        } catch { $robloxInfo.Size = 0 }
-    }
-    
-    Write-LogEntry "Roblox detection completed" "INFO"
-    return $robloxInfo
+	Write-LogEntry "Detecting Roblox installation" "INFO"
+	Show-ProgressBar -Activity "Mendeteksi Roblox" -Status "Mencari instalasi Roblox..." -PercentComplete 30
+	
+	$robloxInfo = @{
+		IsInstalled = $false
+		InstallPath = ""
+		ExecutablePath = ""
+		Version = ""
+		IsRunning = $false
+		ProcessCount = 0
+		InstallDate = ""
+		Size = 0
+	}
+	
+	$possiblePaths = @(
+		"$env:LOCALAPPDATA\Roblox",
+		"$env:PROGRAMFILES\Roblox",
+		"$env:PROGRAMFILES(X86)\Roblox",
+		"$env:APPDATA\Roblox"
+	)
+	foreach ($path in $possiblePaths) {
+		if (Test-Path $path) {
+			$robloxInfo.InstallPath = $path
+			$robloxInfo.IsInstalled = $true
+			Write-LogEntry "Found Roblox installation at: $path" "INFO"
+			break
+		}
+	}
+	
+	# Cari executable jika folder instalasi diketahui
+	if ($robloxInfo.InstallPath) {
+		$exePaths = @(
+			"$($robloxInfo.InstallPath)\RobloxPlayerLauncher.exe",
+			"$($robloxInfo.InstallPath)\Versions\*\RobloxPlayerBeta.exe"
+		)
+		foreach ($exePath in $exePaths) {
+			$foundExe = Get-ChildItem $exePath -ErrorAction SilentlyContinue | Select-Object -First 1
+			if ($foundExe) {
+				$robloxInfo.ExecutablePath = $foundExe.FullName
+				try {
+					$versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($foundExe.FullName)
+					$robloxInfo.Version = $versionInfo.ProductVersion
+				} catch { $robloxInfo.Version = "Unknown" }
+				$robloxInfo.InstallDate = $foundExe.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")
+				break
+			}
+		}
+	}
+	
+	# Check running processes
+	$robloxProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like "*Roblox*" }
+	$robloxInfo.ProcessCount = $robloxProcesses.Count
+	$robloxInfo.IsRunning = ($robloxInfo.IsRunning -or ($robloxProcesses.Count -gt 0))
+	
+	# Hitung ukuran instalasi (aman)
+	if ($robloxInfo.InstallPath -and (Test-Path $robloxInfo.InstallPath)) {
+		try {
+			$items = Get-ChildItem -Path $robloxInfo.InstallPath -Recurse -File -ErrorAction SilentlyContinue -Force | Select-Object -First 50000
+			$totalSize = ($items | Measure-Object -Property Length -Sum).Sum
+			$robloxInfo.Size = [math]::Round(($totalSize) / 1MB, 2)
+		} catch { $robloxInfo.Size = 0 }
+	}
+	
+	Write-LogEntry "Roblox detection completed" "INFO"
+	return $robloxInfo
 }
 
 # Helper: Deteksi MSVC Redistributable via Registry (lebih cepat, tidak memicu MSI reconfiguration)
@@ -419,56 +433,63 @@ function Test-SystemRequirements {
 }
 
 function Get-RobloxLogs {
-    Write-LogEntry "Collecting Roblox logs" "INFO"
-    Show-ProgressBar -Activity "Mengumpulkan Log" -Status "Mencari file log Roblox..." -PercentComplete 70
-    
-    $logInfo = @{
-        Found = $false
-        LogPaths = @()
-        ErrorCount = 0
-        CrashCount = 0
-        LastCrash = ""
-        ErrorSummary = @()
-    }
-    
-    # Common log locations
-    $logPaths = @(
-        "$env:LOCALAPPDATA\Roblox\logs",
-        "$env:TEMP\Roblox",
-        "$env:APPDATA\Roblox\logs"
-    )
-    
-    foreach ($logPath in $logPaths) {
-        if (Test-Path $logPath) {
-            $logFiles = Get-ChildItem $logPath -Filter "*.log" -ErrorAction SilentlyContinue
-            foreach ($logFile in $logFiles) {
-                $logInfo.LogPaths += $logFile.FullName
-                # Copy log to our log directory (safely)
-                try {
-                    $destPath = Join-Path $LogPath "roblox_$($logFile.Name)"
-                    Copy-Item $logFile.FullName $destPath -ErrorAction SilentlyContinue
-                    $Global:TempFiles += $destPath
-                } catch {}
-                # Parse for errors/crash
-                try {
-                    $lines = Get-Content $logFile.FullName -ErrorAction SilentlyContinue
-                    foreach ($line in $lines) {
-                        if ($line -match '(?i)crash|exception|error|exit code|fatal|fail') {
-                            $logInfo.ErrorSummary += $line
-                            if ($line -match '(?i)crash') { $logInfo.CrashCount++ }
-                            if ($line -match '(?i)error|exception|fail|fatal') { $logInfo.ErrorCount++ }
-                            $logInfo.LastCrash = $line
-                        }
-                    }
-                } catch {}
-            }
-            if ($logFiles.Count -gt 0) {
-                $logInfo.Found = $true
-            }
-        }
-    }
-    Write-LogEntry "Found $($logInfo.LogPaths.Count) Roblox log files" "INFO"
-    return $logInfo
+	Write-LogEntry "Collecting Roblox logs" "INFO"
+	Show-ProgressBar -Activity "Mengumpulkan Log" -Status "Mencari file log Roblox..." -PercentComplete 70
+	
+	$logInfo = @{
+		Found = $false
+		LogPaths = @()
+		ErrorCount = 0
+		CrashCount = 0
+		LastCrash = ""
+		ErrorSummary = @()
+	}
+	
+	# Target copy folder: Desktop\logschecker
+	try {
+		$desktopPath = [Environment]::GetFolderPath('Desktop')
+		$desktopLogs = Join-Path $desktopPath 'logschecker'
+		if (-not (Test-Path $desktopLogs)) { New-Item -Path $desktopLogs -ItemType Directory -Force | Out-Null }
+	} catch { $desktopLogs = $script:LogPath }
+	
+	# Common log locations
+	$logPaths = @(
+		"$env:LOCALAPPDATA\Roblox\logs",
+		"$env:TEMP\Roblox",
+		"$env:APPDATA\Roblox\logs"
+	)
+	
+	foreach ($logPath in $logPaths) {
+		if (Test-Path $logPath) {
+			$logFiles = Get-ChildItem $logPath -Filter "*.log" -ErrorAction SilentlyContinue
+			foreach ($logFile in $logFiles) {
+				$logInfo.LogPaths += $logFile.FullName
+				# Copy ke LogPath dan ke Desktop\logschecker
+				try {
+					$dest1 = Join-Path $script:LogPath ("roblox_" + $logFile.Name)
+					$dest2 = Join-Path $desktopLogs ("roblox_" + $logFile.Name)
+					Copy-Item $logFile.FullName $dest1 -ErrorAction SilentlyContinue
+					Copy-Item $logFile.FullName $dest2 -ErrorAction SilentlyContinue
+					$Global:TempFiles += $dest1
+				} catch {}
+				# Parse for errors/crash
+				try {
+					$lines = Get-Content $logFile.FullName -ErrorAction SilentlyContinue
+					foreach ($line in $lines) {
+						if ($line -match '(?i)crash|exception|error|exit code|fatal|fail') {
+							$logInfo.ErrorSummary += $line
+							if ($line -match '(?i)crash') { $logInfo.CrashCount++ }
+							if ($line -match '(?i)error|exception|fail|fatal') { $logInfo.ErrorCount++ }
+							$logInfo.LastCrash = $line
+						}
+					}
+				} catch {}
+			}
+			if ($logFiles.Count -gt 0) { $logInfo.Found = $true }
+		}
+	}
+	Write-LogEntry "Found $($logInfo.LogPaths.Count) Roblox log files" "INFO"
+	return $logInfo
 }
 
 # ==================== DIAGNOSTIC FUNCTIONS ====================
@@ -703,69 +724,74 @@ function Install-MissingDependencies {
 # ==================== REPORT FUNCTIONS ====================
 
 function Show-SystemReport {
-    param($SystemInfo, $RobloxInfo, $Requirements, $LogInfo)
-    
-    Write-ColorText "`n📋 LAPORAN SISTEM" -Color $Colors.Header
-    Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
-    
-    if ($SystemInfo) {
-        Write-ColorText "🖥️  Sistem Operasi: " -Color $Colors.Info -NoNewLine
-        Write-ColorText $SystemInfo.OSName -Color $Colors.Accent
-        
-        Write-ColorText "🏗️  Arsitektur: " -Color $Colors.Info -NoNewLine
-        Write-ColorText $SystemInfo.OSArchitecture -Color $Colors.Accent
-        
-        Write-ColorText "🧠 Prosesor: " -Color $Colors.Info -NoNewLine
-        Write-ColorText $SystemInfo.CPUName -Color $Colors.Accent
-        
-        Write-ColorText "💾 RAM: " -Color $Colors.Info -NoNewLine
-        Write-ColorText "$($SystemInfo.RAMSize) GB" -Color $Colors.Accent
-        
-        Write-ColorText "🎮 GPU: " -Color $Colors.Info -NoNewLine
-        Write-ColorText $SystemInfo.GPUName -Color $Colors.Accent
-        
-        Write-ColorText "⚡ PowerShell: " -Color $Colors.Info -NoNewLine
-        Write-ColorText $SystemInfo.PowerShellVersion -Color $Colors.Accent
-    }
-    
-    Write-ColorText "`n🎮 STATUS ROBLOX" -Color $Colors.Header
-    Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
-    
-    if ($RobloxInfo.IsInstalled) {
-        Write-ColorText "✅ Status: Terinstall" -Color $Colors.Success
-        Write-ColorText "📁 Lokasi: $($RobloxInfo.InstallPath)" -Color $Colors.Info
-        Write-ColorText "📄 Executable: $(Split-Path $RobloxInfo.ExecutablePath -Leaf)" -Color $Colors.Info
-        Write-ColorText "🔖 Versi: $($RobloxInfo.Version)" -Color $Colors.Info
-        Write-ColorText "📊 Ukuran: $($RobloxInfo.Size) MB" -Color $Colors.Info
-        Write-ColorText "📅 Install: $($RobloxInfo.InstallDate)" -Color $Colors.Info
-        
-        if ($RobloxInfo.IsRunning) {
-            Write-ColorText "🟢 Status: Berjalan ($($RobloxInfo.ProcessCount) proses)" -Color $Colors.Success
-        } else {
-            Write-ColorText "🔴 Status: Tidak berjalan" -Color $Colors.Error
-        }
-    } else {
-        Write-ColorText "❌ Status: Tidak terinstall" -Color $Colors.Error
-    }
-    
-    Write-ColorText "`n✅ PERSYARATAN SISTEM" -Color $Colors.Header
-    Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
-    
-    foreach ($req in $Requirements.GetEnumerator()) {
-        $status = if ($req.Value.Met) { "✅" } else { "❌" }
-        $color = if ($req.Value.Met) { $Colors.Success } else { $Colors.Error }
-        
-        Write-ColorText "$status $($req.Key): " -Color $color -NoNewLine
-        Write-ColorText "$($req.Value.Current)" -Color $Colors.Info
-        Write-ColorText "   Diperlukan: $($req.Value.Required)" -Color $Colors.Info
-    }
-    
-    if ($LogInfo.Found) {
-        Write-ColorText "`n📄 LOG ROBLOX" -Color $Colors.Header
-        Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
-        Write-ColorText "📁 Ditemukan: $($LogInfo.LogPaths.Count) file log" -Color $Colors.Success
-        Write-ColorText "📂 Lokasi log: $LogPath" -Color $Colors.Info
-    }
+	param($SystemInfo, $RobloxInfo, $Requirements, $LogInfo)
+	
+	Write-ColorText "`n📋 LAPORAN SISTEM" -Color $Colors.Header
+	Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+	
+	if ($SystemInfo) {
+		Write-ColorText "🖥️  Sistem Operasi: " -Color $Colors.Info -NoNewLine
+		Write-ColorText $SystemInfo.OSName -Color $Colors.Accent
+		Write-ColorText "🏗️  Arsitektur: " -Color $Colors.Info -NoNewLine
+		Write-ColorText $SystemInfo.OSArchitecture -Color $Colors.Accent
+		Write-ColorText "🧠 Prosesor: " -Color $Colors.Info -NoNewLine
+		Write-ColorText $SystemInfo.CPUName -Color $Colors.Accent
+		Write-ColorText "💾 RAM: " -Color $Colors.Info -NoNewLine
+		Write-ColorText "$($SystemInfo.RAMSize) GB" -Color $Colors.Accent
+		Write-ColorText "🎮 GPU: " -Color $Colors.Info -NoNewLine
+		Write-ColorText $SystemInfo.GPUName -Color $Colors.Accent
+		Write-ColorText "⚡ PowerShell: " -Color $Colors.Info -NoNewLine
+		Write-ColorText $SystemInfo.PowerShellVersion -Color $Colors.Accent
+	}
+	
+	Write-ColorText "`n🎮 STATUS ROBLOX" -Color $Colors.Header
+	Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+	
+	if ($RobloxInfo.IsInstalled) {
+		Write-ColorText "✅ Status: Terinstall" -Color $Colors.Success
+		Write-ColorText "📁 Lokasi: $($RobloxInfo.InstallPath)" -Color $Colors.Info
+		if ($RobloxInfo.ExecutablePath) {
+			Write-ColorText "📄 Executable: $(Split-Path $RobloxInfo.ExecutablePath -Leaf)" -Color $Colors.Info
+		}
+		if ($RobloxInfo.Version) {
+			Write-ColorText "🔖 Versi: $($RobloxInfo.Version)" -Color $Colors.Info
+		}
+		Write-ColorText "📊 Ukuran: $($RobloxInfo.Size) MB" -Color $Colors.Info
+		if ($RobloxInfo.InstallDate) {
+			Write-ColorText "📅 Install: $($RobloxInfo.InstallDate)" -Color $Colors.Info
+		}
+		if ($RobloxInfo.IsRunning) {
+			Write-ColorText "🟢 Status: Berjalan ($($RobloxInfo.ProcessCount) proses)" -Color $Colors.Success
+		} else {
+			Write-ColorText "🔴 Status: Tidak berjalan" -Color $Colors.Error
+		}
+	} else {
+		Write-ColorText "❌ Status: Tidak terinstall" -Color $Colors.Error
+	}
+	
+	Write-ColorText "`n✅ PERSYARATAN SISTEM" -Color $Colors.Header
+	Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+	foreach ($req in $Requirements.GetEnumerator()) {
+		$met = if ($req.Value.Met) { "✅" } else { "❌" }
+		$color = if ($req.Value.Met) { $Colors.Success } else { $Colors.Error }
+		Write-ColorText "$met $($req.Key): " -Color $color -NoNewLine
+		Write-ColorText "$($req.Value.Current)" -Color $Colors.Info
+		Write-ColorText "   Diperlukan: $($req.Value.Required)" -Color $Colors.Info
+	}
+	
+	if ($LogInfo.Found) {
+		try {
+			$desktopPath = [Environment]::GetFolderPath('Desktop')
+			$desktopLogs = (Resolve-Path (Join-Path $desktopPath 'logschecker') -ErrorAction SilentlyContinue).Path
+			if (-not $desktopLogs) { $desktopLogs = (Resolve-Path $script:LogPath -ErrorAction SilentlyContinue).Path }
+		} catch { $desktopLogs = $script:LogPath }
+		Write-ColorText "`n📄 LOG ROBLOX" -Color $Colors.Header
+		Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+		Write-ColorText "📁 Ditemukan: $($LogInfo.LogPaths.Count) file log" -Color $Colors.Success
+		Write-ColorText "📂 Lokasi log (Ctrl+Click):" -Color $Colors.Info
+		# Baris path polos agar bisa di-klik
+		Write-Host $desktopLogs
+	}
 }
 
 function Show-DiagnosisReport {
@@ -921,22 +947,27 @@ function Invoke-SafetyCleanup {
 }
 
 function Show-Goodbye {
-    $computerName = $env:COMPUTERNAME
-    Write-Host ""
-    Write-ColorText "╔══════════════════════════════════════════════════════════════╗" -Color $Colors.Header
-    Write-ColorText "║                                                              ║" -Color $Colors.Header
-    Write-ColorText "║                   🎮 SELESAI! 🎮                            ║" -Color $Colors.Header
-    Write-ColorText "║                                                              ║" -Color $Colors.Header
-    Write-ColorText "║               Terima kasih $computerName!                    ║" -Color $Colors.Header
-    Write-ColorText "║                                                              ║" -Color $Colors.Header
-    Write-ColorText "╚══════════════════════════════════════════════════════════════╝" -Color $Colors.Header
-    Write-Host ""
-    Write-ColorText "📄 Log tersimpan di: $Global:LogFile" -Color $Colors.Info
-    Write-ColorText "📂 Folder log: $LogPath" -Color $Colors.Info
-    Write-Host ""
-    Write-ColorText "💡 Tips: Ctrl+Click pada path di atas untuk membuka di File Explorer" -Color $Colors.Accent
-    Write-Host ""
-    Write-ColorText "Sampai jumpa! 👋" -Color $Colors.Success
+	$computerName = $env:COMPUTERNAME
+	Write-Host ""
+	Write-ColorText "╔══════════════════════════════════════════════════════════════╗" -Color $Colors.Header
+	Write-ColorText "║                                                              ║" -Color $Colors.Header
+	Write-ColorText "║                   🎮 SELESAI! 🎮                            ║" -Color $Colors.Header
+	Write-ColorText "║                                                              ║" -Color $Colors.Header
+	Write-ColorText "║               Terima kasih $computerName!                    ║" -Color $Colors.Header
+	Write-ColorText "║                                                              ║" -Color $Colors.Header
+	Write-ColorText "╚══════════════════════════════════════════════════════════════╝" -Color $Colors.Header
+	Write-Host ""
+	Write-ColorText "📄 Log tersimpan di (Ctrl+Click):" -Color $Colors.Info
+	Write-Host $Global:LogFile
+	Write-ColorText "📂 Folder log (Ctrl+Click):" -Color $Colors.Info
+	# Pastikan gunakan path aktual yang dipakai script
+	try {
+		$effectiveLogPath = (Resolve-Path $script:LogPath -ErrorAction SilentlyContinue).Path
+		if (-not $effectiveLogPath) { $effectiveLogPath = $script:LogPath }
+	} catch { $effectiveLogPath = $script:LogPath }
+	Write-Host $effectiveLogPath
+	Write-Host ""
+	Write-ColorText "Sampai jumpa! 👋" -Color $Colors.Success
 }
 
 # ==================== INTERACTIVE FUNCTIONS ====================
