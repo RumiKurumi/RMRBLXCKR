@@ -984,6 +984,14 @@ function Show-Goodbye {
 
 # ==================== INTERACTIVE FUNCTIONS ====================
 
+function Redraw-HeaderAndReset {
+	try {
+		Clear-Host
+		Show-Header
+		[Console]::SetCursorPosition(0, $Global:ContentStartY)
+	} catch {}
+}
+
 function Show-ArrowMenu {
 	param(
 		[string[]]$Options,
@@ -992,7 +1000,7 @@ function Show-ArrowMenu {
 	$selected = $Default
 	$arrow = "➤"
 	do {
-		Reset-ContentArea
+		Redraw-HeaderAndReset
 		Write-Host "🎯 PILIHAN TINDAKAN" -ForegroundColor DarkYellow
 		Write-Host "═══════════════════════════════════════" -ForegroundColor Gray
 		for ($i=0; $i -lt $Options.Length; $i++) {
@@ -1051,7 +1059,7 @@ function Reset-ContentArea {
 }
 
 function Invoke-FullDiagnosis {
-	Reset-ContentArea
+	Redraw-HeaderAndReset
 	Write-ColorText "🔍 MEMULAI DIAGNOSIS LENGKAP..." -Color $Colors.Header
 	
 	# Collect system information
@@ -1076,7 +1084,7 @@ function Invoke-FullDiagnosis {
 	$commonIssues = Test-CommonIssues
 	
 	# Show reports per section dengan jeda
-	Reset-ContentArea
+	Redraw-HeaderAndReset
 	Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
 	Pause-ForSmoothness
 	$hasIssues = Show-DiagnosisReport -IntegrityIssues $integrityIssues -CommonIssues $commonIssues -LogInfo $logInfo
@@ -1182,7 +1190,7 @@ function Main {
 				1 { try { $diagnosisResults = Invoke-FullDiagnosis } catch { Write-ColorText "❌ Diagnosis gagal: $($_.Exception.Message)" -Color $Colors.Error } }
 				2 {
 					try {
-						Reset-ContentArea
+						Redraw-HeaderAndReset
 						Write-ColorText "🔍 Menjalankan diagnosis cepat..." -Color $Colors.Info
 						$diagnosisResults = Invoke-FullDiagnosis
 						Invoke-AutoRepair -DiagnosisResults $diagnosisResults
@@ -1190,17 +1198,17 @@ function Main {
 				}
 				3 {
 					try {
-						Reset-ContentArea
+						Redraw-HeaderAndReset
 						$systemInfo = Get-SystemInfo
 						$robloxInfo = Get-RobloxInfo
 						$requirements = Test-SystemRequirements
 						$logInfo = Get-RobloxLogs
-						Reset-ContentArea
+						Redraw-HeaderAndReset
 						Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
 						Pause-ForSmoothness
 					} catch { Write-ColorText "❌ Gagal menampilkan laporan: $($_.Exception.Message)" -Color $Colors.Error }
 				}
-				4 { Reset-ContentArea; Invoke-CacheCleanOnly }
+				4 { Redraw-HeaderAndReset; Invoke-CacheCleanOnly }
 				5 { break }
 			}
 			
