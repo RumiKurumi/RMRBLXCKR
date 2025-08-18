@@ -395,16 +395,31 @@ function Test-SystemRequirements {
         $requirements.RAM.Current = "$ramGB GB"
         $requirements.RAM.Met = $ramGB -ge 1
         
-        # Check DirectX
-        try {
-            $dx = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\DirectX" -Name Version -ErrorAction SilentlyContinue
-            if ($dx) {
-                $requirements.DirectX.Current = $dx.Version
-                $requirements.DirectX.Met = $true
-            }
-        } catch {
-            $requirements.DirectX.Current = "Tidak terdeteksi"
-        }
+        # Check DirectX via dxdiag (lebih akurat daripada registry)
+		try {
+			$dxDiagTxt = Join-Path $env:TEMP ("dxdiag_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".txt")
+			$proc = Start-Process -FilePath "dxdiag.exe" -ArgumentList "/whql:off", "/t", $dxDiagTxt -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
+			if ($proc) { Wait-Process -Id $proc.Id -Timeout 15 -ErrorAction SilentlyContinue }
+			if (Test-Path $dxDiagTxt) {
+				$line = (Select-String -Path $dxDiagTxt -Pattern 'DirectX Version' -SimpleMatch -ErrorAction SilentlyContinue | Select-Object -First 1).Line
+				if ($line) {
+					$ver = ($line -split ':',2)[1].Trim()
+					$requirements.DirectX.Current = $ver
+					if ($ver -match 'DirectX\s+(\d+)' -and [int]$Matches[1] -ge 9) { $requirements.DirectX.Met = $true } else { $requirements.DirectX.Met = $true }
+				} else {
+					$requirements.DirectX.Current = "Tidak terdeteksi"
+				}
+				try { Remove-Item $dxDiagTxt -Force -ErrorAction SilentlyContinue } catch {}
+			} else {
+				$requirements.DirectX.Current = "Tidak terdeteksi"
+			}
+		} catch {
+			# Fallback ke registry (legacy, sering menunjukkan 4.09.00.0904)
+			try {
+				$dx = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\DirectX" -Name Version -ErrorAction SilentlyContinue
+				if ($dx) { $requirements.DirectX.Current = $dx.Version; $requirements.DirectX.Met = $true } else { $requirements.DirectX.Current = "Tidak terdeteksi" }
+			} catch { $requirements.DirectX.Current = "Tidak terdeteksi" }
+		}
         
         # Check .NET Framework
         $dotNetVersions = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP" -Recurse |
@@ -982,7 +997,6 @@ function Show-ArrowMenu {
 		$menuHeight = $menuStaticLines + $Options.Length
 		Clear-ContentArea -Lines ($menuHeight + 5)
 		Set-CursorToContentStart
-		Write-Host ""
 		Write-Host "🎯 PILIHAN TINDAKAN" -ForegroundColor DarkYellow
 		Write-Host "═══════════════════════════════════════" -ForegroundColor Gray
 		for ($i=0; $i -lt $Options.Length; $i++) {
@@ -1028,16 +1042,19 @@ function Set-CursorToContentStart {
 function Clear-ContentArea {
 	param([int]$Lines = 80)
 	try {
-		$width = $host.UI.RawUI.WindowSize.Width
-		Set-CursorToContentStart
-		for ($i = 0; $i -lt $Lines; $i++) { Write-Host (' ' * ($width)) }
-		Set-CursorToContentStart
+		$raw = $host.UI.RawUI
+		# Bersihkan area buffer dari ContentStartY sampai akhir tanpa menambah baris baru
+		$width = $raw.BufferSize.Width
+		$height = $raw.BufferSize.Height
+		$bottom = [Math]::Min(($Global:ContentStartY + $Lines - 1), ($height - 1))
+		$rect = New-Object System.Management.Automation.Host.Rectangle 0, $Global:ContentStartY, ($width - 1), $bottom
+		$raw.SetBufferContents($rect, ' ')
+		[Console]::SetCursorPosition(0, $Global:ContentStartY)
 	} catch {}
 }
 
 function Invoke-FullDiagnosis {
-	Write-ColorText "`n🔍 MEMULAI DIAGNOSIS LENGKAP..." -Color $Colors.Header
-	Write-Host ""
+	Write-ColorText "🔍 MEMULAI DIAGNOSIS LENGKAP..." -Color $Colors.Header
 	# Pastikan area konten bersih sebelum proses
 	Clear-ContentArea -Lines 120
 	Set-CursorToContentStart
