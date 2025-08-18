@@ -1123,7 +1123,9 @@ function Show-NetworkPacketReport {
 				Write-ColorText ("   - $($p.Name) (PID $($p.Id))") -Color $Colors.Info
 				Write-LogEntry "Conflict process: $($p.Name) PID=$($p.Id)" "WARNING"
 			}
-			Write-LogEntry ("Report: ConflictRunningProcesses=" + ($ConflictingApps.RunningProcesses | Select-Object -ExpandProperty Name | Sort-Object -Unique -Join ',')) "INFO"
+			$names = ($ConflictingApps.RunningProcesses | Select-Object -ExpandProperty Name | Sort-Object -Unique)
+			try { $namesJoined = ($names -join ',') } catch { $namesJoined = ($names | Out-String).Trim() }
+			Write-LogEntry ("Report: ConflictRunningProcesses=" + $namesJoined) "INFO"
 		} else { Write-ColorText "• Tidak ada proses konflik yang terdeteksi saat ini" -Color $Colors.Success }
 		
 		if ($ConflictingApps.InstalledApps.Count -gt 0) {
