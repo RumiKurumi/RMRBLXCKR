@@ -791,6 +791,394 @@ function Install-MissingDependencies {
     return $installed
 }
 
+# ==================== NETWORK SAFE PACKET & UTILITIES ====================
+
+function Clear-RobloxCacheWithBackup {
+	param([switch]$WhatIf)
+	
+	Write-LogEntry "Starting safe Roblox cache clean with backup" "INFO"
+	Write-ColorText "🧹 Membersihkan cache Roblox (dengan backup) ..." -Color $Colors.Info
+	
+	$timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+	$backupRoot = $script:LogPath
+	try { if (-not (Test-Path $backupRoot)) { New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null } } catch {}
+	
+	$targets = @(
+		"$env:LOCALAPPDATA\Roblox\http",
+		"$env:LOCALAPPDATA\Roblox\Downloads",
+		"$env:LOCALAPPDATA\Roblox\ebWebView",
+		"$env:LOCALAPPDATA\Roblox\CookieStore",
+		"$env:TEMP\Roblox"
+	)
+	
+	$cleaned = 0
+	foreach ($dir in $targets) {
+		if ([string]::IsNullOrWhiteSpace($dir)) { continue }
+		if (Test-Path $dir) {
+			try {
+				$leaf = Split-Path $dir -Leaf
+				$backupPath = Join-Path $backupRoot ("backup_" + $leaf + "_" + $timestamp)
+				if (-not $WhatIf) {
+					# Backup menggunakan robocopy agar cepat dan tahan error
+					robocopy $dir $backupPath /MIR /NFL /NDL /NJH /NJS | Out-Null
+					$Global:SafetyBackups += $backupPath
+					# Hapus direktori cache secara aman
+					Remove-Item -Path $dir -Recurse -Force -ErrorAction SilentlyContinue
+					# Buat ulang folder kosong agar aman jika aplikasi mengharapkan eksistensi folder
+					New-Item -Path $dir -ItemType Directory -Force | Out-Null
+				}
+				$cleaned++
+				Write-LogEntry "Cache cleaned with backup: $dir -> $backupPath" "SUCCESS"
+			} catch {
+				Write-LogEntry "Error cleaning cache $dir`: $($_.Exception.Message)" "ERROR"
+			}
+		}
+	}
+	
+	Write-ColorText "✅ Cache Roblox dibersihkan: $cleaned lokasi (backup di $backupRoot)" -Color $Colors.Success
+	return $cleaned
+}
+
+function Get-Port5051Usage {
+	Write-LogEntry "Checking port 5051 usage" "INFO"
+	$results = @()
+	try {
+		# Gunakan netstat sesuai instruksi pengguna agar kompatibel di semua versi
+		$raw = cmd /c "netstat -ano | findstr :5051" 2>$null
+		if ($raw) {
+			$lines = @($raw) -split "`n"
+			$pids = @()
+			foreach ($line in $lines) {
+				$parts = ($line -replace "\s+", " ").Trim().Split(' ')
+				if ($parts.Length -ge 5) {
+					$procId = $parts[$parts.Length-1]
+					if ($procId -match '^[0-9]+$') { $pids += [int]$procId }
+				}
+			}
+			$pids = $pids | Sort-Object -Unique
+			foreach ($procId in $pids) {
+				try {
+					$proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+					$results += [pscustomobject]@{ PID = $procId; ProcessName = ($proc.ProcessName) ; MainModule = (try { $proc.MainModule.FileName } catch { $null }) }
+				} catch {
+					$results += [pscustomobject]@{ PID = $procId; ProcessName = "Unknown"; MainModule = $null }
+				}
+			}
+		}
+	} catch {
+		Write-LogEntry "Error checking port 5051: $($_.Exception.Message)" "ERROR"
+	}
+	return $results
+}
+
+function Find-ConflictingApps {
+	Write-LogEntry "Detecting potentially conflicting apps (G HUB/RTSS/MSI Afterburner/Crucial Momentum Cache/Steering drivers)" "INFO"
+	$findings = [ordered]@{}
+	$findings.RunningProcesses = @()
+	$findings.InstalledApps = @()
+	$findings.Services = @()
+
+	$procPatterns = @(
+		'lghub', 'lghub_agent', 'logitech', 'LGHUB',
+		'rtss', 'RTSS', 'RivaTuner',
+		'MSIAfterburner', 'Afterburner',
+		'Momentum', 'Crucial'
+	)
+	try {
+		$procs = Get-Process -ErrorAction SilentlyContinue
+		foreach ($p in $procs) {
+			foreach ($pat in $procPatterns) {
+				if ($p.ProcessName -like ("*" + $pat + "*")) {
+					$findings.RunningProcesses += [pscustomobject]@{ Name = $p.ProcessName; Id = $p.Id }
+					break
+				}
+			}
+		}
+	} catch {}
+
+	try {
+		$uninstallPaths = @(
+			"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+			"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+			"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
+		)
+		$matchTerms = @('Logitech G HUB','Logitech','RivaTuner','RTSS','MSI Afterburner','Crucial Storage Executive','Momentum Cache','Steering','Wheel')
+		foreach ($path in $uninstallPaths) {
+			$items = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue | Where-Object { $null -ne $_.DisplayName }
+			foreach ($it in $items) {
+				foreach ($term in $matchTerms) {
+					if ($it.DisplayName -like ("*"+$term+"*")) { $findings.InstalledApps += [pscustomobject]@{ Name = $it.DisplayName; Version = $it.DisplayVersion }; break }
+				}
+			}
+		}
+	} catch {}
+
+	try {
+		$svcTerms = @('lghub','logi','rtss','afterburner','momentum','crucial')
+		$svcs = Get-Service -ErrorAction SilentlyContinue
+		foreach ($s in $svcs) {
+			foreach ($st in $svcTerms) {
+				if ($s.Name -like ("*"+$st+"*")) { $findings.Services += [pscustomobject]@{ Name = $s.Name; Status = $s.Status }; break }
+			}
+		}
+	} catch {}
+
+	return $findings
+}
+
+function Install-CloudflareWARP {
+	param([switch]$WhatIf)
+	
+	Write-LogEntry "Installing Cloudflare WARP (latest)" "INFO"
+	Write-ColorText "🌐 Mengunduh & memasang Cloudflare WARP (1.1.1.1)..." -Color $Colors.Info
+	
+	if ($WhatIf) { Write-LogEntry "WhatIf: skipping download/install WARP" "INFO"; return @{ Installed = $false; Method = 'Skipped'; File = $null; ExitCode = $null } }
+	
+	try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
+	
+	$downloadUrl = 'https://1111-releases.cloudflareclient.com/win/latest'
+	$tempRoot = Join-Path $env:TEMP 'RobloxChecker'
+	try { if (-not (Test-Path $tempRoot)) { New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null } } catch {}
+	
+	$resp = $null
+	$targetFile = Join-Path $tempRoot ("CloudflareWARP_latest")
+	try {
+		$resp = Invoke-WebRequest -Uri $downloadUrl -Method Get -MaximumRedirection 5 -UseBasicParsing -ErrorAction Stop
+		$fname = $null
+		if ($resp.Headers.'Content-Disposition') {
+			$cd = $resp.Headers.'Content-Disposition'
+			if ($cd -match 'filename="?([^";]+)') { $fname = $Matches[1] }
+		}
+		if (-not $fname) {
+			try { $fname = [IO.Path]::GetFileName($resp.BaseResponse.ResponseUri.LocalPath) } catch { $fname = 'CloudflareWARP_latest.msi' }
+		}
+		$targetFile = Join-Path $tempRoot $fname
+		$null = Invoke-WebRequest -Uri $downloadUrl -OutFile $targetFile -UseBasicParsing -MaximumRedirection 5 -ErrorAction Stop
+		Write-LogEntry "Downloaded WARP to: $targetFile" "SUCCESS"
+	} catch {
+		Write-LogEntry "Failed to download WARP: $($_.Exception.Message)" "ERROR"
+		return @{ Installed = $false; Method = 'DownloadFailed'; File = $null; ExitCode = -1 }
+	}
+
+	$ext = [IO.Path]::GetExtension($targetFile).ToLower()
+	$exitCode = $null
+	$method = ''
+	try {
+		if ($ext -eq '.msi') {
+			$method = 'MSI /qn'
+			$proc = Start-Process msiexec.exe -ArgumentList "/i `"$targetFile`" /qn" -PassThru -Wait -WindowStyle Hidden
+			$exitCode = $proc.ExitCode
+		} elseif ($ext -eq '.exe') {
+			$method = 'EXE /S'
+			$proc = Start-Process $targetFile -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+			if (-not $proc) {
+				# Coba argumen lain yang umum
+				$proc = Start-Process $targetFile -ArgumentList "/quiet" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+			}
+			$exitCode = if ($proc) { $proc.ExitCode } else { 0 }
+		} else {
+			# Coba asumsikan MSI jika tidak diketahui
+			$method = 'Assumed MSI /qn'
+			$proc = Start-Process msiexec.exe -ArgumentList "/i `"$targetFile`" /qn" -PassThru -Wait -WindowStyle Hidden
+			$exitCode = $proc.ExitCode
+		}
+		Write-LogEntry "WARP installer finished method=$method exitCode=$exitCode" "INFO"
+	} catch {
+		Write-LogEntry "Error running WARP installer: $($_.Exception.Message)" "ERROR"
+		return @{ Installed = $false; Method = $method; File = $targetFile; ExitCode = -2 }
+	}
+	
+	return @{ Installed = ($exitCode -eq 0); Method = $method; File = $targetFile; ExitCode = $exitCode }
+}
+
+function Invoke-NetworkSafePacket {
+	param([switch]$YesToAll)
+	Write-LogEntry "Starting Network Safe Packet" "INFO"
+	Write-ColorText "🚀 Menjalankan paket perbaikan jaringan yang aman..." -Color $Colors.Header
+
+	$results = [ordered]@{}
+
+	# Flush DNS
+	try {
+		$proc = Start-Process ipconfig -ArgumentList "/flushdns" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+		$results.FlushDNS = if ($proc) { $proc.ExitCode } else { 0 }
+		Write-LogEntry "ipconfig /flushdns exitCode=$($results.FlushDNS)" "INFO"
+	} catch { $results.FlushDNS = -1; Write-LogEntry "Failed to flush DNS: $($_.Exception.Message)" "ERROR" }
+
+	# Reset WinHTTP proxy (aman)
+	try {
+		$proc = Start-Process netsh -ArgumentList "winhttp reset proxy" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+		$results.ResetWinHttpProxy = if ($proc) { $proc.ExitCode } else { 0 }
+		Write-LogEntry "netsh winhttp reset proxy exitCode=$($results.ResetWinHttpProxy)" "INFO"
+	} catch { $results.ResetWinHttpProxy = -1; Write-LogEntry "Failed to reset WinHTTP proxy: $($_.Exception.Message)" "ERROR" }
+
+	# Optional: Winsock reset (but ask first, karena perlu restart)
+	$results.WinsockReset = $null
+	try {
+		$ans = if ($YesToAll) { 'Yes' } else { Confirm-ActionEx "Reset Winsock (rekomendasi, tidak berisiko, memerlukan restart)?" }
+		if ($ans -eq 'Yes') {
+			$proc = Start-Process netsh -ArgumentList "winsock reset" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+			$results.WinsockReset = if ($proc) { $proc.ExitCode } else { 0 }
+			Write-LogEntry "netsh winsock reset exitCode=$($results.WinsockReset)" "INFO"
+		} else { $results.WinsockReset = 'Skipped' }
+	} catch { $results.WinsockReset = -1; Write-LogEntry "Failed to reset Winsock: $($_.Exception.Message)" "ERROR" }
+
+	# Cek port 5051
+	$portUsage = Get-Port5051Usage
+	$results.Port5051 = $portUsage
+
+	# Bersihkan cache Roblox dengan backup
+	$results.CacheCleaned = Clear-RobloxCacheWithBackup
+
+	return $results
+}
+
+function Show-NetworkPacketReport {
+	param($PacketResults, $WarpInstallResult, $ConflictingApps)
+	
+	Write-ColorText "`n📋 LAPORAN PERBAIKAN JARINGAN & STABILITAS" -Color $Colors.Header
+	Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
+	
+	if ($PacketResults) {
+		Write-ColorText "• Flush DNS: $($PacketResults.FlushDNS)" -Color $Colors.Info
+		Write-ColorText "• Reset WinHTTP Proxy: $($PacketResults.ResetWinHttpProxy)" -Color $Colors.Info
+		Write-ColorText "• Winsock Reset: $($PacketResults.WinsockReset)" -Color $Colors.Info
+		Write-ColorText "• Cache Roblox dibersihkan (lokasi): $($PacketResults.CacheCleaned)" -Color $Colors.Info
+	}
+	
+	if ($WarpInstallResult) {
+		$warpStatus = if ($WarpInstallResult.Installed) { 'Terpasang' } else { 'Gagal/Skip' }
+		Write-ColorText "• Cloudflare WARP: $warpStatus (method=$($WarpInstallResult.Method), code=$($WarpInstallResult.ExitCode))" -Color $Colors.Info
+	}
+	
+	Write-ColorText "`n🔎 Port 5051" -Color $Colors.Header
+	Write-ColorText "═══════════" -Color $Colors.Header
+	if ($PacketResults -and $PacketResults.Port5051 -and $PacketResults.Port5051.Count -gt 0) {
+		foreach ($i in $PacketResults.Port5051) {
+			Write-ColorText ("• PID $($i.PID) - $($i.ProcessName) " + (if ($i.MainModule) { "($($i.MainModule))" } else { "" })) -Color $Colors.Warning
+			Write-LogEntry "Port5051 in use by PID=$($i.PID) Name=$($i.ProcessName) Path=$($i.MainModule)" "INFO"
+		}
+	} else {
+		Write-ColorText "• Tidak ada proses yang menggunakan port 5051" -Color $Colors.Success
+	}
+	
+	Write-ColorText "`n🧪 Deteksi Aplikasi Berpotensi Konflik (Hyperion/Anti-cheat)" -Color $Colors.Header
+	Write-ColorText "═══════════════════════════════════════════════════════════════" -Color $Colors.Header
+	if ($ConflictingApps) {
+		if ($ConflictingApps.RunningProcesses.Count -gt 0) {
+			Write-ColorText "• Proses berjalan:" -Color $Colors.Warning
+			foreach ($p in $ConflictingApps.RunningProcesses | Sort-Object Name -Unique) {
+				Write-ColorText ("   - $($p.Name) (PID $($p.Id))") -Color $Colors.Info
+				Write-LogEntry "Conflict process: $($p.Name) PID=$($p.Id)" "WARNING"
+			}
+		} else { Write-ColorText "• Tidak ada proses konflik yang terdeteksi saat ini" -Color $Colors.Success }
+		
+		if ($ConflictingApps.InstalledApps.Count -gt 0) {
+			Write-ColorText "• Aplikasi terinstal terkait:" -Color $Colors.Warning
+			foreach ($a in $ConflictingApps.InstalledApps | Sort-Object Name -Unique) {
+				Write-ColorText ("   - $($a.Name) $($a.Version)") -Color $Colors.Info
+			}
+		}
+		if ($ConflictingApps.Services.Count -gt 0) {
+			Write-ColorText "• Services terkait:" -Color $Colors.Warning
+			foreach ($s in $ConflictingApps.Services | Sort-Object Name -Unique) {
+				Write-ColorText ("   - $($s.Name) ($($s.Status))") -Color $Colors.Info
+			}
+		}
+	}
+	
+	Write-ColorText "`nℹ️ Catatan: Banyak kasus Roblox menutup sendiri (wait result 258) karena hooking/driver dari Logitech G HUB/steering wheel, RTSS/MSI Afterburner, atau Crucial Momentum Cache. Nonaktifkan/keluarkan aplikasi tersebut saat bermain untuk stabilitas." -Color $Colors.Warning
+}
+
+function Invoke-NetworkAndStabilityFix {
+	Clear-Host
+	Write-ColorText "🔧 MEMULAI: Perbaikan Jaringan Aman + WARP + Cek Konflik" -Color $Colors.Header
+
+	# Pilih mode: Yes to all atau Step-by-step
+	Write-ColorText "Pilih mode (A=Yes to all / S=Step-by-step): " -Color $Colors.Warning -NoNewLine
+	$mode = ''
+	do {
+		$resp = Read-Host
+		if ($resp -match '^[AaSs]$') { $mode = if ($resp -match '^[Aa]$') { 'All' } else { 'Step' } }
+		else { Write-ColorText "❌ Jawab dengan A atau S: " -Color $Colors.Error -NoNewLine }
+	} while (-not $mode)
+
+	$packet = $null
+	$warp = $null
+	$conflicts = $null
+
+	if ($mode -eq 'All') {
+		# Jalankan semua tanpa konfirmasi tambahan
+		$packet = Invoke-NetworkSafePacket -YesToAll
+		$warp = Install-CloudflareWARP
+		$conflicts = Find-ConflictingApps
+	} else {
+		# Step-by-step: konfirmasi tiap proses
+		$packet = [ordered]@{ FlushDNS=$null; ResetWinHttpProxy=$null; WinsockReset=$null; CacheCleaned=0; Port5051=@() }
+
+		# Flush DNS
+		$ans = Confirm-ActionEx "Jalankan ipconfig /flushdns?"
+		if ($ans -eq 'Yes') {
+			try { $p = Start-Process ipconfig -ArgumentList "/flushdns" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue; $packet.FlushDNS = if ($p){$p.ExitCode}else{0} } catch { $packet.FlushDNS = -1 }
+			Write-LogEntry "Step FlushDNS exitCode=$($packet.FlushDNS)" "INFO"
+		} else { $packet.FlushDNS = 'Skipped' }
+
+		# Reset WinHTTP proxy
+		$ans = Confirm-ActionEx "Reset WinHTTP proxy (netsh winhttp reset proxy)?"
+		if ($ans -eq 'Yes') {
+			try { $p = Start-Process netsh -ArgumentList "winhttp reset proxy" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue; $packet.ResetWinHttpProxy = if ($p){$p.ExitCode}else{0} } catch { $packet.ResetWinHttpProxy = -1 }
+			Write-LogEntry "Step ResetWinHttpProxy exitCode=$($packet.ResetWinHttpProxy)" "INFO"
+		} else { $packet.ResetWinHttpProxy = 'Skipped' }
+
+		# Winsock reset
+		$ans = Confirm-ActionEx "Reset Winsock (butuh restart setelahnya)?"
+		if ($ans -eq 'Yes') {
+			try { $p = Start-Process netsh -ArgumentList "winsock reset" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue; $packet.WinsockReset = if ($p){$p.ExitCode}else{0} } catch { $packet.WinsockReset = -1 }
+			Write-LogEntry "Step WinsockReset exitCode=$($packet.WinsockReset)" "INFO"
+		} else { $packet.WinsockReset = 'Skipped' }
+
+		# Clean cache dengan backup
+		$ans = Confirm-ActionEx "Bersihkan cache Roblox dengan backup?"
+		if ($ans -eq 'Yes') { $packet.CacheCleaned = Clear-RobloxCacheWithBackup } else { $packet.CacheCleaned = 0 }
+
+		# Cek port 5051
+		$ans = Confirm-ActionEx "Cek port 5051 dan proses yang memakainya?"
+		if ($ans -eq 'Yes') { $packet.Port5051 = Get-Port5051Usage } else { $packet.Port5051 = @() }
+
+		# Install WARP
+		$ans = Confirm-ActionEx "Install Cloudflare WARP (1.1.1.1)?"
+		if ($ans -eq 'Yes') { $warp = Install-CloudflareWARP } else { $warp = @{ Installed = $false; Method = 'Skipped'; File = $null; ExitCode = $null } }
+
+		# Deteksi aplikasi konflik
+		$ans = Confirm-ActionEx "Jalankan deteksi aplikasi konflik (G HUB/RTSS/Afterburner/Crucial)?"
+		if ($ans -eq 'Yes') { $conflicts = Find-ConflictingApps } else { $conflicts = @{ RunningProcesses=@(); InstalledApps=@(); Services=@() } }
+	}
+
+	Show-NetworkPacketReport -PacketResults $packet -WarpInstallResult $warp -ConflictingApps $conflicts
+}
+
+function Invoke-SafePacketOnly {
+	param([switch]$YesToAll)
+	Clear-Host
+	Write-ColorText "🔒 MEMULAI: Paket Jaringan Aman saja" -Color $Colors.Header
+	$packet = Invoke-NetworkSafePacket -YesToAll:$YesToAll
+	Show-NetworkPacketReport -PacketResults $packet -WarpInstallResult $null -ConflictingApps $null
+}
+
+function Invoke-ConflictsCheckOnly {
+	Clear-Host
+	Write-ColorText "🔍 MEMULAI: Cek Aplikasi/Service Konflik saja" -Color $Colors.Header
+	$conflicts = Find-ConflictingApps
+	Show-NetworkPacketReport -PacketResults $null -WarpInstallResult $null -ConflictingApps $conflicts
+}
+
+function Invoke-WarpInstallOnly {
+	Clear-Host
+	Write-ColorText "☁️ MEMULAI: Install Cloudflare WARP saja" -Color $Colors.Header
+	$warp = Install-CloudflareWARP
+	Show-NetworkPacketReport -PacketResults $null -WarpInstallResult $warp -ConflictingApps $null
+}
+
 # ==================== REPORT FUNCTIONS ====================
 
 function Show-SystemReport {
@@ -1278,6 +1666,11 @@ function Main {
 				"🔍 Diagnosis Lengkap (Recommended)",
 				"🔧 Perbaikan Otomatis",
 				"🧹 Bersihkan Cache Saja",
+				"🛠️ Paket Jaringan Aman + WARP + Cek Konflik",
+				"🔒 Jalankan Paket Jaringan Aman saja",
+				"🔍 Cek Aplikasi Konflik saja",
+				"☁️ Install Cloudflare WARP saja",
+				"✅ Jalankan ALL (Yes to all)",
 				"❌ Keluar"
 			)
 			$choice = Show-ArrowMenu -Options $menuOptions
@@ -1293,16 +1686,21 @@ function Main {
 					} catch { Write-ColorText "❌ Perbaikan gagal: $($_.Exception.Message)" -Color $Colors.Error }
 				}
 				3 { Clear-Host; Invoke-CacheCleanOnly }
-				4 { break }
+				4 { try { Invoke-NetworkAndStabilityFix } catch { Write-ColorText "❌ Gagal menjalankan paket jaringan: $($_.Exception.Message)" -Color $Colors.Error } }
+				5 { try { Invoke-SafePacketOnly } catch { Write-ColorText "❌ Gagal menjalankan paket jaringan: $($_.Exception.Message)" -Color $Colors.Error } }
+				6 { try { Invoke-ConflictsCheckOnly } catch { Write-ColorText "❌ Gagal menjalankan cek konflik: $($_.Exception.Message)" -Color $Colors.Error } }
+				7 { try { Invoke-WarpInstallOnly } catch { Write-ColorText "❌ Gagal memasang WARP: $($_.Exception.Message)" -Color $Colors.Error } }
+				8 { try { Invoke-NetworkAndStabilityFix -YesToAll } catch { Write-ColorText "❌ Gagal menjalankan ALL: $($_.Exception.Message)" -Color $Colors.Error } }
+				9 { break }
 			}
 			
-			if ($choice -ne 4) {
+			if ($choice -ne 9) {
 				Write-Host ""
 				Write-ColorText "Tekan Enter untuk kembali ke menu..." -Color $Colors.Accent
 				Read-Host | Out-Null
 			}
 			
-		} while ($choice -ne 4)
+		} while ($choice -ne 9)
 		
 	} catch {
 		Write-LogEntry "Unexpected error in main execution: $($_.Exception.Message)" "ERROR"
