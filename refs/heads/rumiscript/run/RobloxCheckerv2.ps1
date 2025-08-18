@@ -278,14 +278,12 @@ function Get-RobloxInfo {
         Size = 0
     }
     
-    # Common Roblox paths
     $possiblePaths = @(
         "$env:LOCALAPPDATA\Roblox",
         "$env:PROGRAMFILES\Roblox",
         "$env:PROGRAMFILES(X86)\Roblox",
         "$env:APPDATA\Roblox"
     )
-    
     foreach ($path in $possiblePaths) {
         if (Test-Path $path) {
             $robloxInfo.InstallPath = $path
@@ -294,52 +292,65 @@ function Get-RobloxInfo {
         }
     }
     
-    # Look for RobloxPlayerLauncher.exe
     if ($robloxInfo.InstallPath) {
         $exePaths = @(
             "$($robloxInfo.InstallPath)\RobloxPlayerLauncher.exe",
             "$($robloxInfo.InstallPath)\Versions\*\RobloxPlayerBeta.exe"
         )
-        
         foreach ($exePath in $exePaths) {
             $foundExe = Get-ChildItem $exePath -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($foundExe) {
                 $robloxInfo.ExecutablePath = $foundExe.FullName
                 $robloxInfo.IsInstalled = $true
-                
-                # Get version info
                 try {
                     $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($foundExe.FullName)
                     $robloxInfo.Version = $versionInfo.ProductVersion
-                } catch {
-                    $robloxInfo.Version = "Unknown"
-                }
-                
-                # Get install date and size
+                } catch { $robloxInfo.Version = "Unknown" }
                 $robloxInfo.InstallDate = $foundExe.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")
                 break
             }
         }
     }
     
-    # Check if Roblox is running
-    $robloxProcesses = Get-Process | Where-Object { $_.ProcessName -like "*Roblox*" }
+    # Check running processes (fast)
+    $robloxProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like "*Roblox*" }
     $robloxInfo.ProcessCount = $robloxProcesses.Count
     $robloxInfo.IsRunning = $robloxProcesses.Count -gt 0
     
-    # Calculate total size
+    # Calculate total size (batasi recursive untuk hindari hang)
     if ($robloxInfo.InstallPath -and (Test-Path $robloxInfo.InstallPath)) {
         try {
-            $totalSize = (Get-ChildItem $robloxInfo.InstallPath -Recurse -File -ErrorAction SilentlyContinue | 
-                         Measure-Object -Property Length -Sum).Sum
-            $robloxInfo.Size = [math]::Round($totalSize / 1MB, 2)
-        } catch {
-            $robloxInfo.Size = 0
-        }
+            $items = Get-ChildItem -Path $robloxInfo.InstallPath -Recurse -File -ErrorAction SilentlyContinue -Force
+            # Batasi hingga 50.000 file untuk menghindari hang di volume besar
+            $items = $items | Select-Object -First 50000
+            $totalSize = ($items | Measure-Object -Property Length -Sum).Sum
+            $robloxInfo.Size = [math]::Round(($totalSize) / 1MB, 2)
+        } catch { $robloxInfo.Size = 0 }
     }
     
     Write-LogEntry "Roblox detection completed" "INFO"
     return $robloxInfo
+}
+
+# Helper: Deteksi MSVC Redistributable via Registry (lebih cepat, tidak memicu MSI reconfiguration)
+function Get-MsvcRedistInfo {
+	$uninstallPaths = @(
+		"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+		"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+	)
+	$msvcEntries = @()
+	foreach ($path in $uninstallPaths) {
+		try {
+			$items = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue | Where-Object {
+				$_.DisplayName -like "*Visual C++*Redistributable*"
+			}
+			if ($items) { $msvcEntries += $items }
+		} catch {}
+	}
+	if ($msvcEntries.Count -gt 0) {
+		return $msvcEntries | Select-Object -Property DisplayName, DisplayVersion | Sort-Object DisplayName -Unique
+	}
+	return $null
 }
 
 function Test-SystemRequirements {
@@ -356,14 +367,15 @@ function Test-SystemRequirements {
     
     try {
         # Check OS
-        $os = Get-WmiObject Win32_OperatingSystem
-        $requirements.OS.Current = $os.Caption
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+        $requirements.OS.Current = if ($os) { $os.Caption } else { (Get-WmiObject Win32_OperatingSystem).Caption }
         $supportedOS = @("Windows 7", "Windows 8", "Windows 10", "Windows 11", "Windows Server")
-        $requirements.OS.Met = $supportedOS | Where-Object { $os.Caption -like "*$_*" }
+        $requirements.OS.Met = $supportedOS | Where-Object { $requirements.OS.Current -like "*$_*" }
         
         # Check RAM
-        $ram = Get-WmiObject Win32_ComputerSystem
-        $ramGB = [math]::Round($ram.TotalPhysicalMemory / 1GB, 2)
+        $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
+        $ramTotal = if ($cs) { $cs.TotalPhysicalMemory } else { (Get-WmiObject Win32_ComputerSystem).TotalPhysicalMemory }
+        $ramGB = [math]::Round($ramTotal / 1GB, 2)
         $requirements.RAM.Current = "$ramGB GB"
         $requirements.RAM.Met = $ramGB -ge 1
         
@@ -389,13 +401,10 @@ function Test-SystemRequirements {
             $requirements.DotNet.Met = $latestVersion -ge "4.0"
         }
         
-        # Check Visual C++ Redistributable
-        $vcRedist = Get-WmiObject Win32_Product | Where-Object { 
-            $_.Name -like "*Visual C++*Redistributable*" 
-        }
-        
-        if ($vcRedist) {
-            $requirements.MSVC.Current = ($vcRedist | Select-Object -First 1).Name
+        # Check Visual C++ Redistributable via registry (bukan Win32_Product)
+        $msvc = Get-MsvcRedistInfo
+        if ($msvc) {
+            $requirements.MSVC.Current = ($msvc | Select-Object -First 1).DisplayName
             $requirements.MSVC.Met = $true
         } else {
             $requirements.MSVC.Current = "Tidak terinstal"
@@ -507,44 +516,32 @@ function Test-CommonIssues {
     
     $issues = @()
     
-    # Check for multiple Roblox processes
-    $robloxProcesses = Get-Process | Where-Object { $_.ProcessName -like "*Roblox*" }
-    if ($robloxProcesses.Count -gt 1) {
-        $issues += "Beberapa proses Roblox berjalan bersamaan ($($robloxProcesses.Count) proses)"
-    }
+    $robloxProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like "*Roblox*" }
+    if ($robloxProcesses.Count -gt 1) { $issues += "Beberapa proses Roblox berjalan bersamaan ($($robloxProcesses.Count) proses)" }
     
-    # Check for antivirus interference
+    # Antivirus info (best effort)
     $antivirusProducts = Get-WmiObject -Namespace "root\SecurityCenter2" -Class AntiVirusProduct -ErrorAction SilentlyContinue
-    if ($antivirusProducts) {
-        $issues += "Antivirus terdeteksi - mungkin memblokir Roblox"
-    }
+    if ($antivirusProducts) { $issues += "Antivirus terdeteksi - mungkin memblokir Roblox" }
     
-    # Check Windows Defender
+    # Windows Defender (best effort)
     try {
         $defenderStatus = Get-MpComputerStatus -ErrorAction SilentlyContinue
-        if ($defenderStatus -and $defenderStatus.RealTimeProtectionEnabled) {
-            $issues += "Windows Defender Real-time Protection aktif"
-        }
-    } catch {
-        # Ignore if Windows Defender module not available
-    }
+        if ($defenderStatus -and $defenderStatus.RealTimeProtectionEnabled) { $issues += "Windows Defender Real-time Protection aktif" }
+    } catch {}
     
-    # Check disk space
-    $drive = Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DeviceID -eq $env:SystemDrive }
-    $freeSpaceGB = [math]::Round($drive.FreeSpace / 1GB, 2)
-    if ($freeSpaceGB -lt 2) {
-        $issues += "Ruang disk hampir penuh ($freeSpaceGB GB tersisa)"
-    }
-    
-    # Check network connectivity
+    # Disk space (C: only)
     try {
-        $ping = Test-Connection "roblox.com" -Count 1 -Quiet -ErrorAction SilentlyContinue
-        if (-not $ping) {
-            $issues += "Tidak dapat terhubung ke server Roblox"
-        }
-    } catch {
-        $issues += "Masalah koneksi internet"
-    }
+        $drive = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction SilentlyContinue
+        if (-not $drive) { $drive = Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DeviceID -eq $env:SystemDrive } }
+        $freeSpaceGB = [math]::Round($drive.FreeSpace / 1GB, 2)
+        if ($freeSpaceGB -lt 2) { $issues += "Ruang disk hampir penuh ($freeSpaceGB GB tersisa)" }
+    } catch {}
+    
+    # Network connectivity (timeout cepat)
+    try {
+        $ping = Test-Connection "roblox.com" -Count 1 -Quiet -ErrorAction SilentlyContinue -TimeoutSeconds 2
+        if (-not $ping) { $issues += "Tidak dapat terhubung ke server Roblox" }
+    } catch { $issues += "Masalah koneksi internet" }
     
     Write-LogEntry "Common issues check completed, found $($issues.Count) issues" "INFO"
     return $issues
@@ -677,12 +674,9 @@ function Install-MissingDependencies {
     
     $installed = 0
     
-    # Check Visual C++ Redistributable
-    $vcRedist = Get-WmiObject Win32_Product | Where-Object { 
-        $_.Name -like "*Visual C++*Redistributable*" 
-    }
-    
-    if (-not $vcRedist) {
+    # Check Visual C++ Redistributable via registry
+    $msvc = Get-MsvcRedistInfo
+    if (-not $msvc) {
         Write-ColorText "⚠️ Visual C++ Redistributable tidak ditemukan" -Color $Colors.Warning
         Write-ColorText "ℹ️ Unduh dari: https://aka.ms/vs/17/release/vc_redist.x64.exe" -Color $Colors.Info
         $installed++
@@ -1125,38 +1119,35 @@ function Main {
             $choice = Show-ArrowMenu -Options $menuOptions
             
             switch ($choice) {
-                1 { 
-                    # Full diagnosis
-                    $diagnosisResults = Invoke-FullDiagnosis
-                    Write-Host ""
-                    if ($diagnosisResults.HasIssues) {
-                        if (Confirm-Action "🔧 Ingin melakukan perbaikan otomatis?") {
-                            Invoke-AutoRepair -DiagnosisResults $diagnosisResults
-                        }
+                1 {
+                    try {
+                        $diagnosisResults = Invoke-FullDiagnosis
+                    } catch {
+                        Write-ColorText "❌ Diagnosis gagal: $($_.Exception.Message)" -Color $Colors.Error
                     }
                 }
-                2 { 
-                    # Auto repair (with diagnosis first)
-                    Write-ColorText "🔍 Menjalankan diagnosis cepat..." -Color $Colors.Info
-                    $diagnosisResults = Invoke-FullDiagnosis
-                    Invoke-AutoRepair -DiagnosisResults $diagnosisResults
+                2 {
+                    try {
+                        Write-ColorText "🔍 Menjalankan diagnosis cepat..." -Color $Colors.Info
+                        $diagnosisResults = Invoke-FullDiagnosis
+                        Invoke-AutoRepair -DiagnosisResults $diagnosisResults
+                    } catch {
+                        Write-ColorText "❌ Perbaikan gagal: $($_.Exception.Message)" -Color $Colors.Error
+                    }
                 }
-                3 { 
-                    # System report only
-                    $systemInfo = Get-SystemInfo
-                    $robloxInfo = Get-RobloxInfo
-                    $requirements = Test-SystemRequirements
-                    $logInfo = Get-RobloxLogs
-                    Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
+                3 {
+                    try {
+                        $systemInfo = Get-SystemInfo
+                        $robloxInfo = Get-RobloxInfo
+                        $requirements = Test-SystemRequirements
+                        $logInfo = Get-RobloxLogs
+                        Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
+                    } catch {
+                        Write-ColorText "❌ Gagal menampilkan laporan: $($_.Exception.Message)" -Color $Colors.Error
+                    }
                 }
-                4 { 
-                    # Cache clean only
-                    Invoke-CacheCleanOnly
-                }
-                5 { 
-                    # Exit
-                    break 
-                }
+                4 { Invoke-CacheCleanOnly }
+                5 { break }
             }
             
             if ($choice -ne 5) {
