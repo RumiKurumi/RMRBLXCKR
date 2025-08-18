@@ -991,12 +991,8 @@ function Show-ArrowMenu {
 	)
 	$selected = $Default
 	$arrow = "➤"
-	$menuStaticLines = 4  # judul, separator, instruksi, spasi
 	do {
-		# Render menu di area konten tanpa menyentuh header
-		$menuHeight = $menuStaticLines + $Options.Length
-		Clear-ContentArea -Lines ($menuHeight + 5)
-		Set-CursorToContentStart
+		Reset-ContentArea
 		Write-Host "🎯 PILIHAN TINDAKAN" -ForegroundColor DarkYellow
 		Write-Host "═══════════════════════════════════════" -ForegroundColor Gray
 		for ($i=0; $i -lt $Options.Length; $i++) {
@@ -1040,24 +1036,23 @@ function Set-CursorToContentStart {
 	try { [Console]::SetCursorPosition(0, $Global:ContentStartY) } catch {}
 }
 function Clear-ContentArea {
-	param([int]$Lines = 80)
 	try {
 		$raw = $host.UI.RawUI
-		# Bersihkan area buffer dari ContentStartY sampai akhir tanpa menambah baris baru
 		$width = $raw.BufferSize.Width
 		$height = $raw.BufferSize.Height
-		$bottom = [Math]::Min(($Global:ContentStartY + $Lines - 1), ($height - 1))
-		$rect = New-Object System.Management.Automation.Host.Rectangle 0, $Global:ContentStartY, ($width - 1), $bottom
+		$rect = New-Object System.Management.Automation.Host.Rectangle 0, $Global:ContentStartY, ($width - 1), ($height - 1)
 		$raw.SetBufferContents($rect, ' ')
 		[Console]::SetCursorPosition(0, $Global:ContentStartY)
 	} catch {}
 }
+function Reset-ContentArea {
+	Clear-ContentArea
+	Set-CursorToContentStart
+}
 
 function Invoke-FullDiagnosis {
+	Reset-ContentArea
 	Write-ColorText "🔍 MEMULAI DIAGNOSIS LENGKAP..." -Color $Colors.Header
-	# Pastikan area konten bersih sebelum proses
-	Clear-ContentArea -Lines 120
-	Set-CursorToContentStart
 	
 	# Collect system information
 	Show-LoadingBar -Text "Mengumpulkan informasi sistem" -Duration 2
@@ -1081,6 +1076,7 @@ function Invoke-FullDiagnosis {
 	$commonIssues = Test-CommonIssues
 	
 	# Show reports per section dengan jeda
+	Reset-ContentArea
 	Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
 	Pause-ForSmoothness
 	$hasIssues = Show-DiagnosisReport -IntegrityIssues $integrityIssues -CommonIssues $commonIssues -LogInfo $logInfo
@@ -1183,12 +1179,10 @@ function Main {
 			$choice = Show-ArrowMenu -Options $menuOptions
 			
 			switch ($choice) {
-				1 {
-					try { $diagnosisResults = Invoke-FullDiagnosis } catch { Write-ColorText "❌ Diagnosis gagal: $($_.Exception.Message)" -Color $Colors.Error }
-				}
+				1 { try { $diagnosisResults = Invoke-FullDiagnosis } catch { Write-ColorText "❌ Diagnosis gagal: $($_.Exception.Message)" -Color $Colors.Error } }
 				2 {
 					try {
-						Clear-ContentArea -Lines 120; Set-CursorToContentStart
+						Reset-ContentArea
 						Write-ColorText "🔍 Menjalankan diagnosis cepat..." -Color $Colors.Info
 						$diagnosisResults = Invoke-FullDiagnosis
 						Invoke-AutoRepair -DiagnosisResults $diagnosisResults
@@ -1196,21 +1190,21 @@ function Main {
 				}
 				3 {
 					try {
-						Clear-ContentArea -Lines 120; Set-CursorToContentStart
+						Reset-ContentArea
 						$systemInfo = Get-SystemInfo
 						$robloxInfo = Get-RobloxInfo
 						$requirements = Test-SystemRequirements
 						$logInfo = Get-RobloxLogs
+						Reset-ContentArea
 						Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
 						Pause-ForSmoothness
 					} catch { Write-ColorText "❌ Gagal menampilkan laporan: $($_.Exception.Message)" -Color $Colors.Error }
 				}
-				4 { Clear-ContentArea -Lines 120; Set-CursorToContentStart; Invoke-CacheCleanOnly }
+				4 { Reset-ContentArea; Invoke-CacheCleanOnly }
 				5 { break }
 			}
 			
 			if ($choice -ne 5) {
-				Write-Host ""
 				Write-ColorText "Tekan Enter untuk kembali ke menu..." -Color $Colors.Accent
 				Read-Host | Out-Null
 			}
