@@ -800,6 +800,13 @@ function Show-SystemReport {
 		Write-ColorText "📁 Ditemukan: $($LogInfo.LogPaths.Count) file log" -Color $Colors.Success
 		Write-ColorText "📂 Lokasi log (Ctrl+Click):" -Color $Colors.Info
 		Write-Host $desktopLogs
+		# Tampilkan cuplikan error/crash singkat
+		if ($LogInfo.ErrorSummary.Count -gt 0) {
+			Write-ColorText "🔎 Cuplikan Error/Crash (maks 3):" -Color $Colors.Warning
+			$preview = [Math]::Min(3, $LogInfo.ErrorSummary.Count)
+			for ($i=0; $i -lt $preview; $i++) { Write-ColorText ("   • " + $LogInfo.ErrorSummary[$i]) -Color $Colors.Info }
+			if ($LogInfo.ErrorSummary.Count -gt $preview) { Write-ColorText "   ...lihat ringkasan lengkap di bagian diagnosis." -Color $Colors.Info }
+		}
 	}
 }
 
@@ -1198,7 +1205,6 @@ function Main {
 			$menuOptions = @(
 				"🔍 Diagnosis Lengkap (Recommended)",
 				"🔧 Perbaikan Otomatis",
-				"📊 Lihat Laporan Sistem",
 				"🧹 Bersihkan Cache Saja",
 				"❌ Keluar"
 			)
@@ -1214,28 +1220,17 @@ function Main {
 						Invoke-AutoRepair -DiagnosisResults $diagnosisResults
 					} catch { Write-ColorText "❌ Perbaikan gagal: $($_.Exception.Message)" -Color $Colors.Error }
 				}
-				3 {
-					try {
-						Clear-Host
-						$systemInfo = Get-SystemInfo
-						$robloxInfo = Get-RobloxInfo
-						$requirements = Test-SystemRequirements
-						$logInfo = Get-RobloxLogs
-						Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo
-						Pause-ForSmoothness
-					} catch { Write-ColorText "❌ Gagal menampilkan laporan: $($_.Exception.Message)" -Color $Colors.Error }
-				}
-				4 { Clear-Host; Invoke-CacheCleanOnly }
-				5 { break }
+				3 { Clear-Host; Invoke-CacheCleanOnly }
+				4 { break }
 			}
 			
-			if ($choice -ne 5) {
+			if ($choice -ne 4) {
 				Write-Host ""
 				Write-ColorText "Tekan Enter untuk kembali ke menu..." -Color $Colors.Accent
 				Read-Host | Out-Null
 			}
 			
-		} while ($choice -ne 5)
+		} while ($choice -ne 4)
 		
 	} catch {
 		Write-LogEntry "Unexpected error in main execution: $($_.Exception.Message)" "ERROR"
