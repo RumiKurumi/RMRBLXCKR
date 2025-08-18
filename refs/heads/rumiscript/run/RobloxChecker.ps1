@@ -184,7 +184,7 @@ function Show-Header {
     Write-TypewriterText "╔══════════════════════════════════════════════════════════════╗" $Colors.Header 2
     Write-TypewriterText "║                                                              ║" $Colors.Header 2
     Write-TypewriterText "║               🎮 ROBLOX CHECKER BY RUMI 🎮                   ║" $Colors.Header 2
-    Write-TypewriterText "║                    Version $Global:ScriptVersion                          ║" $Colors.Header 2
+    Write-TypewriterText "║                    Version $Global:ScriptVersion                           ║" $Colors.Header 2
     Write-TypewriterText "║                                                              ║" $Colors.Header 2
     Write-TypewriterText "╚══════════════════════════════════════════════════════════════╝" $Colors.Header 2
     Write-Host ""

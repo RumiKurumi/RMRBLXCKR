@@ -850,9 +850,12 @@ function Show-SystemReport {
     if ($Connectivity) {
         Write-ColorText "`n🌐 KONEKTIVITAS ROBLOX" -Color $Colors.Header
         Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
-        Write-ColorText ("Ping roblox.com: " + (if ($Connectivity.PingOk) { 'OK' } else { 'Gagal' })) -Color $Colors.Info
-        Write-ColorText ("HTTP www.roblox.com: " + (if ($Connectivity.HttpOkMain) { 'OK' } else { 'Gagal' })) -Color $Colors.Info
-        Write-ColorText ("HTTP apis.roblox.com: " + (if ($Connectivity.HttpOkApi) { 'OK' } else { 'Gagal' })) -Color $Colors.Info
+        $pingStatus = if ($Connectivity.PingOk) { 'OK' } else { 'Gagal' }
+        $mainStatus = if ($Connectivity.HttpOkMain) { 'OK' } else { 'Gagal' }
+        $apiStatus  = if ($Connectivity.HttpOkApi)  { 'OK' } else { 'Gagal' }
+        Write-ColorText ("Ping roblox.com: $pingStatus") -Color $Colors.Info
+        Write-ColorText ("HTTP www.roblox.com: $mainStatus") -Color $Colors.Info
+        Write-ColorText ("HTTP apis.roblox.com: $apiStatus") -Color $Colors.Info
     }
     
     if ($LogInfo.Found) {
@@ -1087,7 +1090,7 @@ function Show-ArrowMenu {
             }
         }
         Write-Host ""
-        Write-Host "Gunakan panah atas/bawah, Enter untuk pilih. (Jika tidak bisa, ketik angka pilihan)" -ForegroundColor Gray
+        Write-Host "Gunakan panah atas/bawah, Enter untuk pilih." -ForegroundColor Gray
     }
 
     Write-MenuOptions -Sel $selected
