@@ -1,0 +1,7 @@
+README.md
+logs/
+*.log
+*.bak
+backup_*
+roblox_registry_backup.reg
+RobloxChecker-Base.zip
