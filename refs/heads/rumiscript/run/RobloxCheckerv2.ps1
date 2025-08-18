@@ -999,35 +999,52 @@ function Show-ArrowMenu {
 	)
 	$selected = $Default
 	$arrow = "➤"
-	do {
-		# Bersihkan layar dan tampilkan header di main menu saja
-		Clear-Host
-		Show-Header
-		Write-Host "🎯 PILIHAN TINDAKAN" -ForegroundColor DarkYellow
-		Write-Host "═══════════════════════════════════════" -ForegroundColor Gray
+
+	# Gambar sekali di awal
+	Clear-Host
+	Show-Header
+	Write-Host "🎯 PILIHAN TINDAKAN" -ForegroundColor DarkYellow
+	Write-Host "═══════════════════════════════════════" -ForegroundColor Gray
+	# Simpan posisi awal baris opsi
+	$optionsTopY = 0
+	try { $optionsTopY = [Console]::CursorTop } catch { $optionsTopY = 0 }
+
+	function Render-Options {
+		param([int]$Sel)
+		try { [Console]::SetCursorPosition(0, $optionsTopY) } catch {}
 		for ($i=0; $i -lt $Options.Length; $i++) {
-			if ($i -eq $selected) {
-				Write-Host ($arrow + " " + $Options[$i]) -ForegroundColor Black -BackgroundColor Yellow
+			if ($i -eq $Sel) {
+				Write-Host ($arrow + " " + $Options[$i] + (" " * 40)) -ForegroundColor Black -BackgroundColor Yellow
 			} else {
-				Write-Host ("  " + $Options[$i]) -ForegroundColor DarkYellow
+				Write-Host ("  " + $Options[$i] + (" " * 40)) -ForegroundColor DarkYellow
 			}
 		}
-		Write-Host ""
+		# Garis instruksi persis di bawah daftar opsi
+		Write-Host ""  
 		Write-Host "Gunakan panah atas/bawah, Enter untuk pilih. (Jika tidak bisa, ketik angka pilihan)" -ForegroundColor Gray
+	}
+
+	Render-Options -Sel $selected
+	
+	do {
 		$key = $null
 		try { $key = [System.Console]::ReadKey($true) } catch {}
 		if ($key) {
 			if ($key.Key -eq "UpArrow") {
 				$selected = if ($selected -le 0) { $Options.Length-1 } else { $selected-1 }
+				Render-Options -Sel $selected
 			} elseif ($key.Key -eq "DownArrow") {
 				$selected = if ($selected -ge $Options.Length-1) { 0 } else { $selected+1 }
+				Render-Options -Sel $selected
 			} elseif ($key.Key -eq "Enter") {
 				return ($selected+1)
 			}
 		} else {
-			# Fallback: input angka
+			# Fallback input angka tanpa clear seluruh layar
+			try { [Console]::SetCursorPosition(0, ($optionsTopY + $Options.Length + 2)) } catch {}
 			$userInput = Read-Host ("Pilihan Anda (1-" + $Options.Length + ")")
 			if ($userInput -match ("^[1-" + $Options.Length + "]$")) { return [int]$userInput }
+			Render-Options -Sel $selected
 		}
 	} while ($true)
 }
