@@ -743,6 +743,7 @@ function Show-SystemReport {
 		Write-ColorText "⚡ PowerShell: " -Color $Colors.Info -NoNewLine
 		Write-ColorText $SystemInfo.PowerShellVersion -Color $Colors.Accent
 	}
+	Pause-ForSmoothness
 	
 	Write-ColorText "`n🎮 STATUS ROBLOX" -Color $Colors.Header
 	Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
@@ -750,24 +751,15 @@ function Show-SystemReport {
 	if ($RobloxInfo.IsInstalled) {
 		Write-ColorText "✅ Status: Terinstall" -Color $Colors.Success
 		Write-ColorText "📁 Lokasi: $($RobloxInfo.InstallPath)" -Color $Colors.Info
-		if ($RobloxInfo.ExecutablePath) {
-			Write-ColorText "📄 Executable: $(Split-Path $RobloxInfo.ExecutablePath -Leaf)" -Color $Colors.Info
-		}
-		if ($RobloxInfo.Version) {
-			Write-ColorText "🔖 Versi: $($RobloxInfo.Version)" -Color $Colors.Info
-		}
+		if ($RobloxInfo.ExecutablePath) { Write-ColorText "📄 Executable: $(Split-Path $RobloxInfo.ExecutablePath -Leaf)" -Color $Colors.Info }
+		if ($RobloxInfo.Version) { Write-ColorText "🔖 Versi: $($RobloxInfo.Version)" -Color $Colors.Info }
 		Write-ColorText "📊 Ukuran: $($RobloxInfo.Size) MB" -Color $Colors.Info
-		if ($RobloxInfo.InstallDate) {
-			Write-ColorText "📅 Install: $($RobloxInfo.InstallDate)" -Color $Colors.Info
-		}
-		if ($RobloxInfo.IsRunning) {
-			Write-ColorText "🟢 Status: Berjalan ($($RobloxInfo.ProcessCount) proses)" -Color $Colors.Success
-		} else {
-			Write-ColorText "🔴 Status: Tidak berjalan" -Color $Colors.Error
-		}
+		if ($RobloxInfo.InstallDate) { Write-ColorText "📅 Install: $($RobloxInfo.InstallDate)" -Color $Colors.Info }
+		if ($RobloxInfo.IsRunning) { Write-ColorText "🟢 Status: Berjalan ($($RobloxInfo.ProcessCount) proses)" -Color $Colors.Success } else { Write-ColorText "🔴 Status: Tidak berjalan" -Color $Colors.Error }
 	} else {
 		Write-ColorText "❌ Status: Tidak terinstall" -Color $Colors.Error
 	}
+	Pause-ForSmoothness
 	
 	Write-ColorText "`n✅ PERSYARATAN SISTEM" -Color $Colors.Header
 	Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
@@ -778,6 +770,7 @@ function Show-SystemReport {
 		Write-ColorText "$($req.Value.Current)" -Color $Colors.Info
 		Write-ColorText "   Diperlukan: $($req.Value.Required)" -Color $Colors.Info
 	}
+	Pause-ForSmoothness
 	
 	if ($LogInfo.Found) {
 		try {
@@ -789,7 +782,6 @@ function Show-SystemReport {
 		Write-ColorText "═══════════════════════════════════════" -Color $Colors.Header
 		Write-ColorText "📁 Ditemukan: $($LogInfo.LogPaths.Count) file log" -Color $Colors.Success
 		Write-ColorText "📂 Lokasi log (Ctrl+Click):" -Color $Colors.Info
-		# Baris path polos agar bisa di-klik
 		Write-Host $desktopLogs
 	}
 }
@@ -807,6 +799,7 @@ function Show-DiagnosisReport {
         Write-ColorText "   Roblox seharusnya berjalan dengan normal." -Color $Colors.Info
         return $false
     }
+    Pause-ForSmoothness
     
     Write-ColorText "⚠️ Ditemukan $totalIssues masalah:" -Color $Colors.Warning
     
@@ -815,12 +808,14 @@ function Show-DiagnosisReport {
         foreach ($issue in $IntegrityIssues) {
             Write-ColorText "   • $issue" -Color $Colors.Error
         }
+        Pause-ForSmoothness
     }
     if ($CommonIssues.Count -gt 0) {
         Write-ColorText "`n⚠️ Masalah Umum:" -Color $Colors.Warning
         foreach ($issue in $CommonIssues) {
             Write-ColorText "   • $issue" -Color $Colors.Warning
         }
+        Pause-ForSmoothness
     }
     if ($LogInfo.ErrorSummary.Count -gt 0) {
         Write-ColorText "`n🚨 Ringkasan Error/Crash dari Log Roblox:" -Color $Colors.Error
