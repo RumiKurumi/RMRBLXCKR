@@ -926,12 +926,53 @@ function Find-ConflictingApps {
 	return $findings
 }
 
+function Test-CloudflareWARPInstalled {
+	Write-LogEntry "Checking if Cloudflare WARP is already installed" "INFO"
+	$result = @{ Installed = $false; Version = $null; Path = $null }
+	try {
+		$uninstallPaths = @(
+			"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+			"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+			"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
+		)
+		$entry = $null
+		foreach ($path in $uninstallPaths) {
+			$items = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue | Where-Object { $null -ne $_.DisplayName }
+			$hit = $items | Where-Object { $_.DisplayName -like '*Cloudflare WARP*' -or $_.DisplayName -like '*Cloudflare*WARP*' } | Select-Object -First 1
+			if ($hit) { $entry = $hit; break }
+		}
+		if ($entry) { $result.Installed = $true; $result.Version = $entry.DisplayVersion }
+	} catch {}
+	try {
+		$paths = @(
+			(Join-Path $env:ProgramFiles 'Cloudflare/Cloudflare WARP/Cloudflare WARP.exe'),
+			(Join-Path $env:ProgramFiles 'Cloudflare/Cloudflare WARP/warp-cli.exe')
+		)
+		foreach ($p in $paths) { if (Test-Path $p) { $result.Path = $p; $result.Installed = $true; break } }
+	} catch {}
+	try {
+		$svc = Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*WARP*' -or $_.DisplayName -like '*Cloudflare*WARP*' } | Select-Object -First 1
+		if ($svc) { $result.Installed = $true }
+	} catch {}
+	if ($result.Installed) { Write-LogEntry ("Cloudflare WARP detected (Version=" + ($result.Version) + ", Path=" + ($result.Path) + ")") "INFO" } else { Write-LogEntry "Cloudflare WARP not detected" "INFO" }
+	return $result
+}
+
 function Install-CloudflareWARP {
 	param([switch]$WhatIf)
 	
 	Write-LogEntry "Installing Cloudflare WARP (latest)" "INFO"
 	Write-ColorText "🌐 Mengunduh & memasang Cloudflare WARP (1.1.1.1)..." -Color $Colors.Info
 	
+    # Idempotent: skip if already installed
+    try {
+        $det = Test-CloudflareWARPInstalled
+        if ($det -and $det.Installed) {
+            Write-ColorText "✅ Cloudflare WARP sudah terpasang. Melewati download/install." -Color $Colors.Success
+            return @{ Installed = $true; Method = 'AlreadyInstalled'; File = $null; ExitCode = 0; Version = $det.Version; Path = $det.Path }
+        }
+    } catch {}
+
 	if ($WhatIf) { Write-LogEntry "WhatIf: skipping download/install WARP" "INFO"; return @{ Installed = $false; Method = 'Skipped'; File = $null; ExitCode = $null } }
 	
 	try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
@@ -1667,10 +1708,6 @@ function Main {
 				"🔧 Perbaikan Otomatis",
 				"🧹 Bersihkan Cache Saja",
 				"🛠️ Paket Jaringan Aman + WARP + Cek Konflik",
-				"🔒 Jalankan Paket Jaringan Aman saja",
-				"🔍 Cek Aplikasi Konflik saja",
-				"☁️ Install Cloudflare WARP saja",
-				"✅ Jalankan ALL (Yes to all)",
 				"❌ Keluar"
 			)
 			$choice = Show-ArrowMenu -Options $menuOptions
@@ -1687,20 +1724,16 @@ function Main {
 				}
 				3 { Clear-Host; Invoke-CacheCleanOnly }
 				4 { try { Invoke-NetworkAndStabilityFix } catch { Write-ColorText "❌ Gagal menjalankan paket jaringan: $($_.Exception.Message)" -Color $Colors.Error } }
-				5 { try { Invoke-SafePacketOnly } catch { Write-ColorText "❌ Gagal menjalankan paket jaringan: $($_.Exception.Message)" -Color $Colors.Error } }
-				6 { try { Invoke-ConflictsCheckOnly } catch { Write-ColorText "❌ Gagal menjalankan cek konflik: $($_.Exception.Message)" -Color $Colors.Error } }
-				7 { try { Invoke-WarpInstallOnly } catch { Write-ColorText "❌ Gagal memasang WARP: $($_.Exception.Message)" -Color $Colors.Error } }
-				8 { try { Invoke-NetworkAndStabilityFix -YesToAll } catch { Write-ColorText "❌ Gagal menjalankan ALL: $($_.Exception.Message)" -Color $Colors.Error } }
-				9 { break }
+				5 { break }
 			}
 			
-			if ($choice -ne 9) {
+			if ($choice -ne 5) {
 				Write-Host ""
 				Write-ColorText "Tekan Enter untuk kembali ke menu..." -Color $Colors.Accent
 				Read-Host | Out-Null
 			}
 			
-		} while ($choice -ne 9)
+		} while ($choice -ne 5)
 		
 	} catch {
 		Write-LogEntry "Unexpected error in main execution: $($_.Exception.Message)" "ERROR"
