@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 4.0
 <#
 .SYNOPSIS
     Roblox Checker & Fixer by Rumi - Comprehensive Roblox diagnostic and repair tool
@@ -8,7 +8,8 @@
 .NOTES
     Version: 2.0
     Author: Rumi
-    Compatible: Windows 7/8/8.1/10/11 (x86/x64)
+    Compatible: Windows 7/8/8.1/10/11 (x86/x64/ARM64)
+    Full Support: Windows 10 Build 1507+ / Windows 11 All Builds
 #>
 
 param(
@@ -38,6 +39,146 @@ $Colors = @{
     Debug = 'Magenta'
     Header = 'Gray'         # Cream/Beige
     Accent = 'DarkYellow'   # Orange/Peach
+}
+
+# ==================== WINDOWS COMPATIBILITY CHECK ====================
+
+function Test-WindowsCompatibility {
+	$compatibility = @{
+		OSVersion = $null
+		OSBuild = $null
+		Architecture = $null
+		PowerShellVersion = $null
+		IsWindows10 = $false
+		IsWindows11 = $false
+		IsARM64 = $false
+		SupportsCIM = $false
+		SupportsWMI = $false
+		CompatibilityLevel = "Unknown"
+	}
+	
+	try {
+		# Get OS info using CIM (preferred) with WMI fallback
+		$os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+		if (-not $os) {
+			$os = Get-WmiObject -Class Win32_OperatingSystem -ErrorAction SilentlyContinue
+		}
+		
+		if ($os) {
+			$compatibility.OSVersion = $os.Version
+			$compatibility.OSBuild = $os.BuildNumber
+			$compatibility.Architecture = $os.OSArchitecture
+			
+			# Detect Windows 10/11
+			if ($os.Version -like "10.*") {
+				if ([int]$os.BuildNumber -ge 22000) {
+					$compatibility.IsWindows11 = $true
+					$compatibility.CompatibilityLevel = "Windows 11"
+				} else {
+					$compatibility.IsWindows10 = $true
+					$compatibility.CompatibilityLevel = "Windows 10"
+				}
+			}
+			
+			# Detect ARM64
+			if ($os.OSArchitecture -like "*ARM64*") {
+				$compatibility.IsARM64 = $true
+			}
+		}
+		
+		# PowerShell version
+		$compatibility.PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+		
+		# Test CIM support
+		try {
+			$null = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+			$compatibility.SupportsCIM = $true
+		} catch {
+			$compatibility.SupportsCIM = $false
+		}
+		
+		# Test WMI support
+		try {
+			$null = Get-WmiObject -Class Win32_ComputerSystem -ErrorAction Stop
+			$compatibility.SupportsWMI = $true
+		} catch {
+			$compatibility.SupportsWMI = $false
+		}
+		
+		Write-LogEntry "Compatibility: OS=$($compatibility.CompatibilityLevel), Build=$($compatibility.OSBuild), Arch=$($compatibility.Architecture), PS=$($compatibility.PowerShellVersion)" "INFO"
+		
+	} catch {
+		Write-LogEntry "Error checking Windows compatibility: $($_.Exception.Message)" "ERROR"
+	}
+	
+	return $compatibility
+}
+
+function Get-SystemInfoCompat {
+	param($Compatibility)
+	
+	$systemInfo = @{
+		OSName = $null
+		OSArchitecture = $null
+		CPUName = $null
+		RAMSize = $null
+		GPUName = $null
+		PowerShellVersion = $null
+	}
+	
+	try {
+		# Use CIM if supported, fallback to WMI
+		if ($Compatibility.SupportsCIM) {
+			$os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+			$cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction SilentlyContinue
+			$ram = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
+			$gpu = Get-CimInstance -ClassName Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "*Basic*" } | Select-Object -First 1
+		} else {
+			$os = Get-WmiObject -Class Win32_OperatingSystem -ErrorAction SilentlyContinue
+			$cpu = Get-WmiObject -Class Win32_Processor -ErrorAction SilentlyContinue
+			$ram = Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue
+			$gpu = Get-WmiObject -Class Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "*Basic*" } | Select-Object -First 1
+		}
+		
+		if ($os) { $systemInfo.OSName = $os.Caption }
+		if ($cpu) { $systemInfo.CPUName = $cpu.Name }
+		if ($ram) { $systemInfo.RAMSize = [math]::Round($ram.TotalPhysicalMemory / 1GB, 2) }
+		if ($gpu) { $systemInfo.GPUName = $gpu.Name }
+		$systemInfo.PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+		$systemInfo.OSArchitecture = if ($os) { $os.OSArchitecture } else { "Unknown" }
+		
+	} catch {
+		Write-LogEntry "Error collecting system info: $($_.Exception.Message)" "ERROR"
+	}
+	
+	return $systemInfo
+}
+
+# ==================== ADMIN ELEVATION CHECK ====================
+
+function Test-AdminPrivileges {
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Request-AdminElevation {
+    Write-ColorText "🔐 Program memerlukan hak akses Administrator untuk berjalan dengan optimal" -Color $Colors.Warning
+    Write-ColorText "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -Color $Colors.Info
+    
+    try {
+        $scriptPath = $MyInvocation.MyCommand.Path
+        if (-not $scriptPath) { $scriptPath = $PSCommandPath }
+        if (-not $scriptPath) { $scriptPath = "powershell.exe" }
+        
+        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"", "-Verb", "RunAs" -Wait
+        exit 0
+    } catch {
+        Write-ColorText "❌ Gagal meminta elevation admin: $($_.Exception.Message)" -Color $Colors.Error
+        Write-ColorText "💡 Jalankan PowerShell sebagai Administrator dan jalankan script ini lagi" -Color $Colors.Info
+        Read-Host "Tekan Enter untuk keluar"
+        exit 1
+    }
 }
 
 # ==================== UTILITY FUNCTIONS ====================
@@ -99,6 +240,147 @@ function Show-LoadingSpinner {
     Write-Host ""
 }
 
+# Banner khusus untuk instalasi WARP (ASCII art + subtitle berwarna accent)
+function Show-WarpInstallBanner {
+	param(
+		[string]$Subtitle = "Silent Warping, harap tunggu gess.."
+	)
+
+	$banner = @"
+ ███████████                               ███                          
+░░███░░░░░███                             ░░░                           
+ ░███    ░███  █████ ████ █████████████   ████                          
+ ░██████████  ░░███ ░███ ░░███░░███░░███ ░░███                          
+ ░███░░░░░███  ░███ ░███  ░███ ░███ ░███  ░███                          
+ ░███    ░███  ░███ ░███  ░███ ░███ ░███  ░███                          
+ █████   █████ ░░████████ █████░███ █████ █████                         
+░░░░░   ░░░░░   ░░░░░░░░ ░░░░░ ░░░ ░░░░░ ░░░░░                          
+   █████████  █████                        █████                        
+  ███░░░░░███░░███                        ░░███                         
+ ███     ░░░  ░███████    ██████   ██████  ░███ █████  ██████  ████████ 
+░███          ░███░░███  ███░░███ ███░░███ ░███░░███  ███░░███░░███░░███
+░███          ░███ ░███ ░███████ ░███ ░░░  ░██████░  ░███████  ░███ ░░░ 
+░░███     ███ ░███ ░███ ░███░░░  ░███  ███ ░███░░███ ░███░░░   ░███     
+ ░░█████████  ████ █████░░██████ ░░██████  ████ █████░░██████  █████    
+  ░░░░░░░░░  ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░ ░░░░░  ░░░░░░  ░░░░░     
+"@
+
+	try { Clear-Host } catch {}
+	Write-ColorText $banner -Color $Colors.Accent
+	Write-Host ""
+	Write-ColorText ("🎯 " + $Subtitle) -Color $Colors.Accent
+	Write-Host ""
+}
+
+# Fungsi untuk menjalankan dan memverifikasi WARP VPN
+function Start-CloudflareWARP {
+	param([switch]$WhatIf)
+	
+	Write-LogEntry "Starting Cloudflare WARP VPN" "INFO"
+	Write-ColorText "🌐 Menjalankan Cloudflare WARP VPN..." -Color $Colors.Info
+	
+	# Cek apakah WARP sudah terinstall
+	$warpInstalled = Test-CloudflareWARPInstalled
+	if (-not $warpInstalled.Installed) {
+		Write-ColorText "❌ Cloudflare WARP belum terinstall" -Color $Colors.Error
+		return @{ Connected = $false; Method = 'NotInstalled'; PID = $null; Service = $null }
+	}
+	
+	$warpCliPath = $null
+	$possiblePaths = @(
+		(Join-Path $env:ProgramFiles 'Cloudflare\Cloudflare WARP\warp-cli.exe'),
+		(Join-Path $env:ProgramFiles 'Cloudflare\Cloudflare WARP\warp.exe'),
+		(Join-Path $env:ProgramFiles 'Cloudflare\Cloudflare WARP\Cloudflare WARP.exe')
+	)
+	
+	foreach ($path in $possiblePaths) {
+		if (Test-Path $path) {
+			$warpCliPath = $path
+			break
+		}
+	}
+	
+	if (-not $warpCliPath) {
+		Write-ColorText "❌ WARP CLI tidak ditemukan" -Color $Colors.Error
+		return @{ Connected = $false; Method = 'CLINotFound'; PID = $null; Service = $null }
+	}
+	
+	Write-ColorText "🔧 Mempersiapkan WARP VPN..." -Color $Colors.Info
+	
+	try {
+		# Register WARP service untuk startup
+		Write-ColorText "⚙️ Mengatur startup service..." -Color $Colors.Info
+		$proc = Start-Process $warpCliPath -ArgumentList "register" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+		if ($proc.ExitCode -eq 0) {
+			Write-ColorText "✅ Startup service berhasil diatur" -Color $Colors.Success
+		}
+		
+		# Connect ke WARP VPN
+		Write-ColorText "🔗 Menyambungkan ke WARP VPN..." -Color $Colors.Info
+		$proc = Start-Process $warpCliPath -ArgumentList "connect" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+		
+		Start-Sleep -Seconds 5  # Tunggu koneksi stabil
+		
+		# Verifikasi koneksi
+		Write-ColorText "🔍 Memverifikasi koneksi WARP..." -Color $Colors.Info
+		$null = Start-Process $warpCliPath -ArgumentList "status" -PassThru -Wait -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\warp_status.txt" -ErrorAction SilentlyContinue
+		
+		$status = ""
+		if (Test-Path "$env:TEMP\warp_status.txt") {
+			$status = Get-Content "$env:TEMP\warp_status.txt" -Raw
+			Remove-Item "$env:TEMP\warp_status.txt" -Force -ErrorAction SilentlyContinue
+		}
+		
+		# Cek process WARP yang berjalan
+		$warpProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { 
+			$_.ProcessName -like '*warp*' -or $_.ProcessName -like '*cloudflare*' 
+		}
+		
+		# Cek service WARP
+		$warpServices = Get-Service -ErrorAction SilentlyContinue | Where-Object { 
+			$_.Name -like '*WARP*' -or $_.DisplayName -like '*Cloudflare*WARP*' 
+		}
+		
+		$isConnected = $status -like "*Connected*" -or $status -like "*connected*"
+		
+		if ($isConnected) {
+			Write-ColorText "✅ WARP VPN berhasil tersambung!" -Color $Colors.Success
+			Write-ColorText "🌍 Status: $status" -Color $Colors.Info
+			
+			if ($warpProcesses) {
+				foreach ($proc in $warpProcesses) {
+					Write-ColorText "🔄 Process: $($proc.ProcessName) (PID: $($proc.Id))" -Color $Colors.Success
+				}
+			}
+			
+			if ($warpServices) {
+				foreach ($svc in $warpServices) {
+					Write-ColorText "⚙️ Service: $($svc.Name) ($($svc.Status))" -Color $Colors.Success
+				}
+			}
+			
+			Write-LogEntry "WARP VPN connected successfully. Status: $status" "SUCCESS"
+			return @{ 
+				Connected = $true; 
+				Method = 'VPN'; 
+				PID = ($warpProcesses | Select-Object -First 1).Id; 
+				Service = ($warpServices | Select-Object -First 1).Name;
+				Status = $status
+			}
+		} else {
+			Write-ColorText "⚠️ WARP VPN gagal tersambung" -Color $Colors.Warning
+			Write-ColorText "📋 Status: $status" -Color $Colors.Info
+			Write-LogEntry "WARP VPN connection failed. Status: $status" "WARNING"
+			return @{ Connected = $false; Method = 'ConnectionFailed'; PID = $null; Service = $null; Status = $status }
+		}
+		
+	} catch {
+		Write-ColorText "❌ Error menjalankan WARP VPN: $($_.Exception.Message)" -Color $Colors.Error
+		Write-LogEntry "Error starting WARP VPN: $($_.Exception.Message)" "ERROR"
+		return @{ Connected = $false; Method = 'Error'; PID = $null; Service = $null }
+	}
+}
+
 function Show-ProgressBar {
     param(
         [string]$Activity,
@@ -126,6 +408,19 @@ function Get-TimeBasedGreeting {
 
 function Initialize-Environment {
 	Write-LogEntry "Initializing Roblox Checker environment" "INFO"
+	
+	# Check Windows compatibility first
+	$Global:WindowsCompatibility = Test-WindowsCompatibility
+	
+	# Display compatibility info
+	Write-ColorText "🔍 Deteksi Kompatibilitas Windows..." -Color $Colors.Info
+	Write-ColorText "📋 OS: $($Global:WindowsCompatibility.CompatibilityLevel)" -Color $Colors.Info
+	Write-ColorText "🏗️ Arsitektur: $($Global:WindowsCompatibility.Architecture)" -Color $Colors.Info
+	Write-ColorText "⚡ PowerShell: $($Global:WindowsCompatibility.PowerShellVersion)" -Color $Colors.Info
+	
+	if ($Global:WindowsCompatibility.IsARM64) {
+		Write-ColorText "🆕 ARM64 Architecture Detected" -Color $Colors.Warning
+	}
 	
 	# Tentukan folder log di Desktop (logschecker) jika tidak ditentukan
 	try {
@@ -160,7 +455,7 @@ function Initialize-Environment {
 	Write-LogEntry "Script Version: $Global:ScriptVersion" "INFO"
 	Write-LogEntry "Computer: $env:COMPUTERNAME" "INFO"
 	Write-LogEntry "User: $env:USERNAME" "INFO"
-	Write-LogEntry "OS: $((Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption)" "INFO"
+	Write-LogEntry "Compatibility: $($Global:WindowsCompatibility.CompatibilityLevel) Build $($Global:WindowsCompatibility.OSBuild) $($Global:WindowsCompatibility.Architecture)" "INFO"
 }
 
 function Write-TypewriterText {
@@ -306,22 +601,21 @@ function Get-SystemInfo {
     Show-ProgressBar -Activity "Mengumpulkan Informasi Sistem" -Status "Mendapatkan detail sistem..." -PercentComplete 10
     
     try {
-        $os = Get-WmiObject Win32_OperatingSystem
-        $cpu = Get-WmiObject Win32_Processor
-        $ram = Get-WmiObject Win32_ComputerSystem
-        $gpu = Get-WmiObject Win32_VideoController | Where-Object { $_.Name -notlike "*Basic*" } | Select-Object -First 1
+        # Use compatibility-aware system info collection
+        $systemInfo = Get-SystemInfoCompat -Compatibility $Global:WindowsCompatibility
         
-        $systemInfo = @{
-            OSName = $os.Caption
-            OSVersion = $os.Version
-            OSArchitecture = $os.OSArchitecture
-            CPUName = $cpu.Name
-            CPUCores = $cpu.NumberOfCores
-            RAMSize = [math]::Round($ram.TotalPhysicalMemory / 1GB, 2)
-            GPUName = if ($gpu) { $gpu.Name } else { "Tidak terdeteksi" }
-            Username = $env:USERNAME
-            ComputerName = $env:COMPUTERNAME
-            PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+        # Add additional info
+        $systemInfo.Username = $env:USERNAME
+        $systemInfo.ComputerName = $env:COMPUTERNAME
+        
+        # Get CPU cores if available
+        if ($Global:WindowsCompatibility.SupportsCIM) {
+            $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction SilentlyContinue
+        } else {
+            $cpu = Get-WmiObject -Class Win32_Processor -ErrorAction SilentlyContinue
+        }
+        if ($cpu) {
+            $systemInfo.CPUCores = $cpu.NumberOfCores
         }
         
         Write-LogEntry "System info collected successfully" "SUCCESS"
@@ -330,6 +624,42 @@ function Get-SystemInfo {
         Write-LogEntry "Error collecting system info: $($_.Exception.Message)" "ERROR"
         return $null
     }
+}
+
+function Test-ARM64Compatibility {
+	param($Compatibility)
+	
+	$arm64Info = @{
+		IsARM64 = $false
+		EmulationMode = $false
+		CompatibilityIssues = @()
+		Recommendations = @()
+	}
+	
+	if ($Compatibility.IsARM64) {
+		$arm64Info.IsARM64 = $true
+		
+		# Check for x64 emulation
+		try {
+			$envVars = @("PROCESSOR_ARCHITECTURE", "PROCESSOR_ARCHITEW6432")
+			foreach ($var in $envVars) {
+				$envValue = (Get-Item "env:$var" -ErrorAction SilentlyContinue).Value
+				if ($envValue -like "*AMD64*") {
+					$arm64Info.EmulationMode = $true
+					break
+				}
+			}
+		} catch {}
+		
+		# ARM64 specific recommendations
+		$arm64Info.Recommendations += "ARM64 Architecture Detected"
+		$arm64Info.Recommendations += "Some features may run under x64 emulation"
+		$arm64Info.Recommendations += "Performance may vary compared to native x64"
+		
+		Write-LogEntry "ARM64 compatibility check completed" "INFO"
+	}
+	
+	return $arm64Info
 }
 
 function Get-RobloxInfo {
@@ -437,15 +767,18 @@ function Test-SystemRequirements {
     }
     
     try {
-        # Check OS
-        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
-        $requirements.OS.Current = if ($os) { $os.Caption } else { (Get-WmiObject Win32_OperatingSystem).Caption }
+        # Check OS - use compatibility-aware approach
+        $requirements.OS.Current = $Global:WindowsCompatibility.CompatibilityLevel
         $supportedOS = @("Windows 7", "Windows 8", "Windows 10", "Windows 11", "Windows Server")
         $requirements.OS.Met = $supportedOS | Where-Object { $requirements.OS.Current -like "*$_*" }
         
-        # Check RAM
-        $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
-        $ramTotal = if ($cs) { $cs.TotalPhysicalMemory } else { (Get-WmiObject Win32_ComputerSystem).TotalPhysicalMemory }
+        # Check RAM - use compatibility-aware approach
+        if ($Global:WindowsCompatibility.SupportsCIM) {
+            $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
+        } else {
+            $cs = Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue
+        }
+        $ramTotal = if ($cs) { $cs.TotalPhysicalMemory } else { 0 }
         $ramGB = [math]::Round($ramTotal / 1GB, 2)
         $requirements.RAM.Current = "$ramGB GB"
         $requirements.RAM.Met = $ramGB -ge 1
@@ -476,10 +809,23 @@ function Test-SystemRequirements {
 			try { $dx = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\DirectX" -Name Version -ErrorAction SilentlyContinue; if ($dx) { $requirements.DirectX.Current = $dx.Version; $requirements.DirectX.Met = $true } } catch { $requirements.DirectX.Current = "Tidak terdeteksi" }
 		}
         
-        # Check .NET Framework
-        $dotNetVersions = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP" -Recurse |
-                         Get-ItemProperty -Name Version, Release -ErrorAction SilentlyContinue |
-                         Where-Object { $_.PSChildName -match "^v" }
+        # Check .NET Framework - Windows 11 compatible registry paths
+        $dotNetVersions = @()
+        $registryPaths = @(
+            "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP",
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\NET Framework Setup\NDP"
+        )
+        
+        foreach ($regPath in $registryPaths) {
+            try {
+                $versions = Get-ChildItem $regPath -Recurse -ErrorAction SilentlyContinue |
+                           Get-ItemProperty -Name Version, Release -ErrorAction SilentlyContinue |
+                           Where-Object { $_.PSChildName -match "^v" }
+                $dotNetVersions += $versions
+            } catch {
+                # Continue if registry path not accessible
+            }
+        }
         
         if ($dotNetVersions) {
             $latestVersion = ($dotNetVersions | Sort-Object Version | Select-Object -Last 1).Version
@@ -945,17 +1291,35 @@ function Test-CloudflareWARPInstalled {
 		}
 		if ($entry) { $result.Installed = $true; $result.Version = $entry.DisplayVersion }
 	} catch {}
-	try {
-		$paths = @(
-			(Join-Path $env:ProgramFiles 'Cloudflare/Cloudflare WARP/Cloudflare WARP.exe'),
-			(Join-Path $env:ProgramFiles 'Cloudflare/Cloudflare WARP/warp-cli.exe')
-		)
-		foreach ($p in $paths) { if (Test-Path $p) { $result.Path = $p; $result.Installed = $true; break } }
-	} catch {}
-	try {
-		$svc = Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*WARP*' -or $_.DisplayName -like '*Cloudflare*WARP*' } | Select-Object -First 1
-		if ($svc) { $result.Installed = $true }
-	} catch {}
+	# File existence check - hanya jika registry sudah positif
+	if ($result.Installed) {
+		try {
+			$paths = @(
+				(Join-Path $env:ProgramFiles 'Cloudflare\Cloudflare WARP\Cloudflare WARP.exe'),
+				(Join-Path $env:ProgramFiles 'Cloudflare\Cloudflare WARP\warp-cli.exe'),
+				(Join-Path $env:ProgramFiles 'Cloudflare\Cloudflare WARP\warp.exe')
+			)
+			foreach ($p in $paths) { 
+				if (Test-Path $p) { 
+					$result.Path = $p; 
+					Write-LogEntry "WARP executable found at: $p" "INFO"
+					break 
+				} 
+			}
+		} catch { Write-LogEntry "Error checking WARP files: $($_.Exception.Message)" "ERROR" }
+	}
+	
+	# Service check - hanya jika registry sudah positif
+	if ($result.Installed) {
+		try {
+			$svc = Get-Service -ErrorAction SilentlyContinue | Where-Object { 
+				$_.Name -like '*WARP*' -or $_.DisplayName -like '*Cloudflare*WARP*' 
+			} | Select-Object -First 1
+			if ($svc) { 
+				Write-LogEntry "WARP service found: $($svc.Name) ($($svc.DisplayName))" "INFO"
+			}
+		} catch { Write-LogEntry "Error checking WARP services: $($_.Exception.Message)" "ERROR" }
+	}
 	if ($result.Installed) { Write-LogEntry ("Cloudflare WARP detected (Version=" + ($result.Version) + ", Path=" + ($result.Path) + ")") "INFO" } else { Write-LogEntry "Cloudflare WARP not detected" "INFO" }
 	return $result
 }
@@ -984,9 +1348,13 @@ function Install-CloudflareWARP {
 	$tempRoot = Join-Path $env:TEMP 'RobloxChecker'
 	try { if (-not (Test-Path $tempRoot)) { New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null } } catch {}
 	
+	Write-ColorText "📥 Mengunduh dari: $downloadUrl" -Color $Colors.Info
+	Write-ColorText "📁 Folder temporary: $tempRoot" -Color $Colors.Info
+	
 	$resp = $null
 	$targetFile = Join-Path $tempRoot ("CloudflareWARP_latest")
 	try {
+		Write-ColorText "🔍 Mendeteksi nama file dari server..." -Color $Colors.Info
 		$resp = Invoke-WebRequest -Uri $downloadUrl -Method Get -MaximumRedirection 5 -UseBasicParsing -ErrorAction Stop
 		$fname = $null
 		if ($resp.Headers.'Content-Disposition') {
@@ -997,9 +1365,26 @@ function Install-CloudflareWARP {
 			try { $fname = [IO.Path]::GetFileName($resp.BaseResponse.ResponseUri.LocalPath) } catch { $fname = 'CloudflareWARP_latest.msi' }
 		}
 		$targetFile = Join-Path $tempRoot $fname
+		
+		Write-ColorText "📋 Nama file: $fname" -Color $Colors.Info
+		Write-ColorText "💾 Ukuran: $([math]::Round($resp.ContentLength / 1MB, 2)) MB" -Color $Colors.Info
+		
+		Write-ColorText "⏳ Mengunduh file..." -Color $Colors.Info
 		$null = Invoke-WebRequest -Uri $downloadUrl -OutFile $targetFile -UseBasicParsing -MaximumRedirection 5 -ErrorAction Stop
-		Write-LogEntry "Downloaded WARP to: $targetFile" "SUCCESS"
+		
+		# Verifikasi file berhasil didownload
+		if (Test-Path $targetFile) {
+			$fileSize = (Get-Item $targetFile).Length
+			$fileSizeMB = [math]::Round($fileSize / 1MB, 2)
+			Write-ColorText "✅ Download berhasil!" -Color $Colors.Success
+			Write-ColorText "📁 Lokasi: $targetFile" -Color $Colors.Success
+			Write-ColorText "📊 Ukuran file: $fileSizeMB MB" -Color $Colors.Success
+			Write-LogEntry "Downloaded WARP to: $targetFile (Size: $fileSizeMB MB)" "SUCCESS"
+		} else {
+			throw "File tidak ditemukan setelah download"
+		}
 	} catch {
+		Write-ColorText "❌ Gagal mengunduh WARP: $($_.Exception.Message)" -Color $Colors.Error
 		Write-LogEntry "Failed to download WARP: $($_.Exception.Message)" "ERROR"
 		return @{ Installed = $false; Method = 'DownloadFailed'; File = $null; ExitCode = -1 }
 	}
@@ -1007,32 +1392,97 @@ function Install-CloudflareWARP {
 	$ext = [IO.Path]::GetExtension($targetFile).ToLower()
 	$exitCode = $null
 	$method = ''
+	
+	# Tampilkan banner instalasi khusus WARP
+	Show-WarpInstallBanner "Silent Warping, harap tunggu gess.."
+	Start-Sleep -Seconds 2  # Delay sebelum install
+	
 	try {
+		Write-ColorText "🔧 Memulai instalasi silent..." -Color $Colors.Info
+		
 		if ($ext -eq '.msi') {
-			$method = 'MSI /qn'
-			$proc = Start-Process msiexec.exe -ArgumentList "/i `"$targetFile`" /qn" -PassThru -Wait -WindowStyle Hidden
+			$method = 'MSI Silent (/qn /norestart)'
+			Write-ColorText "📦 Menggunakan MSI installer dengan mode silent" -Color $Colors.Info
+			$proc = Start-Process msiexec.exe -ArgumentList "/i `"$targetFile`" /qn /norestart /log `"$tempRoot\warp_install.log`"" -PassThru -Wait -WindowStyle Hidden
 			$exitCode = $proc.ExitCode
 		} elseif ($ext -eq '.exe') {
-			$method = 'EXE /S'
-			$proc = Start-Process $targetFile -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+			$method = 'EXE Silent (/S /quiet)'
+			Write-ColorText "📦 Menggunakan EXE installer dengan mode silent" -Color $Colors.Info
+			
+			# Coba berbagai argumen silent yang umum
+			$silentArgs = @("/S", "/quiet", "/silent", "/VERYSILENT", "/sp-", "/suppressmsgboxes")
+			$proc = $null
+			
+			foreach ($arg in $silentArgs) {
+				try {
+					Write-ColorText "🔄 Mencoba argumen: $arg" -Color $Colors.Info
+					$proc = Start-Process $targetFile -ArgumentList $arg -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+					if ($proc -and $proc.ExitCode -eq 0) {
+						$method = "EXE Silent ($arg)"
+						break
+					}
+				} catch {
+					Write-LogEntry ("Failed with arg " + $arg + ": " + $_.Exception.Message) "WARNING"
+					continue
+				}
+			}
+			
 			if (-not $proc) {
-				# Coba argumen lain yang umum
-				$proc = Start-Process $targetFile -ArgumentList "/quiet" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+				$method = 'EXE Silent (fallback)'
+				$proc = Start-Process $targetFile -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
 			}
 			$exitCode = if ($proc) { $proc.ExitCode } else { 0 }
 		} else {
 			# Coba asumsikan MSI jika tidak diketahui
-			$method = 'Assumed MSI /qn'
-			$proc = Start-Process msiexec.exe -ArgumentList "/i `"$targetFile`" /qn" -PassThru -Wait -WindowStyle Hidden
+			$method = 'Assumed MSI Silent (/qn)'
+			Write-ColorText "📦 Menggunakan MSI installer (asumsi)" -Color $Colors.Info
+			$proc = Start-Process msiexec.exe -ArgumentList "/i `"$targetFile`" /qn /norestart" -PassThru -Wait -WindowStyle Hidden
 			$exitCode = $proc.ExitCode
 		}
-		Write-LogEntry "WARP installer finished method=$method exitCode=$exitCode" "INFO"
+		
+		Start-Sleep -Seconds 3  # Delay setelah install untuk stabilitas
+		
+		# Verifikasi instalasi
+		Write-ColorText "🔍 Memverifikasi instalasi..." -Color $Colors.Info
+		$verifyResult = Test-CloudflareWARPInstalled
+		
+		if ($verifyResult.Installed) {
+			Write-ColorText "✅ Instalasi berhasil!" -Color $Colors.Success
+			Write-ColorText "📁 Lokasi: $($verifyResult.Path)" -Color $Colors.Success
+			Write-ColorText "📋 Versi: $($verifyResult.Version)" -Color $Colors.Success
+			
+			# Auto-connect WARP VPN setelah instalasi berhasil
+			Write-ColorText "🚀 Memulai WARP VPN..." -Color $Colors.Info
+			$warpConnection = Start-CloudflareWARP
+			
+			if ($warpConnection.Connected) {
+				Write-ColorText "🎉 WARP VPN berhasil dijalankan dan tersambung!" -Color $Colors.Success
+			} else {
+				Write-ColorText "⚠️ WARP terinstall tapi gagal tersambung" -Color $Colors.Warning
+			}
+			
+			# Simpan hasil koneksi VPN untuk report
+			$vpnResult = $warpConnection
+		} else {
+			Write-ColorText "⚠️ Instalasi selesai tapi verifikasi gagal" -Color $Colors.Warning
+		}
+		
+		Write-LogEntry "WARP installer finished method=$method exitCode=$exitCode, Verified=$($verifyResult.Installed)" "INFO"
 	} catch {
+		Write-ColorText "❌ Error saat instalasi: $($_.Exception.Message)" -Color $Colors.Error
 		Write-LogEntry "Error running WARP installer: $($_.Exception.Message)" "ERROR"
 		return @{ Installed = $false; Method = $method; File = $targetFile; ExitCode = -2 }
 	}
 	
-	return @{ Installed = ($exitCode -eq 0); Method = $method; File = $targetFile; ExitCode = $exitCode }
+	# Sembunyikan banner dan kembali ke tampilan normal
+	try { Clear-Host } catch {}
+	return @{ 
+		Installed = ($exitCode -eq 0); 
+		Method = $method; 
+		File = $targetFile; 
+		ExitCode = $exitCode;
+		VPNConnection = if ($verifyResult.Installed -and $vpnResult) { $vpnResult } else { $null }
+	}
 }
 
 function Invoke-NetworkSafePacket {
@@ -1044,16 +1494,42 @@ function Invoke-NetworkSafePacket {
 
 	# Flush DNS
 	try {
+		Write-ColorText "🧹 Membersihkan cache DNS..." -Color $Colors.Info
 		$proc = Start-Process ipconfig -ArgumentList "/flushdns" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
 		$results.FlushDNS = if ($proc) { $proc.ExitCode } else { 0 }
 		Write-LogEntry "ipconfig /flushdns exitCode=$($results.FlushDNS)" "INFO"
+		Write-ColorText "✅ DNS cache berhasil dibersihkan" -Color $Colors.Success
+		Start-Sleep -Seconds 1  # Delay untuk stabilitas
 	} catch { $results.FlushDNS = -1; Write-LogEntry "Failed to flush DNS: $($_.Exception.Message)" "ERROR" }
+
+	# Release & Renew IP (untuk reset koneksi jaringan)
+	try {
+		Write-ColorText "🔄 Melepas dan memperbarui IP address..." -Color $Colors.Info
+		$proc = Start-Process ipconfig -ArgumentList "/release" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+		$results.ReleaseIP = if ($proc) { $proc.ExitCode } else { 0 }
+		Write-LogEntry "ipconfig /release exitCode=$($results.ReleaseIP)" "INFO"
+		Write-ColorText "✅ IP address berhasil dilepas" -Color $Colors.Success
+		
+		Start-Sleep -Seconds 3  # Tunggu lebih lama untuk stabilitas
+		
+		$proc = Start-Process ipconfig -ArgumentList "/renew" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+		$results.RenewIP = if ($proc) { $proc.ExitCode } else { 0 }
+		Write-LogEntry "ipconfig /renew exitCode=$($results.RenewIP)" "INFO"
+		Write-ColorText "✅ IP address berhasil diperbarui" -Color $Colors.Success
+		Start-Sleep -Seconds 2  # Delay untuk stabilitas
+	} catch { 
+		$results.ReleaseIP = -1; $results.RenewIP = -1
+		Write-LogEntry "Failed to release/renew IP: $($_.Exception.Message)" "ERROR" 
+	}
 
 	# Reset WinHTTP proxy (aman)
 	try {
+		Write-ColorText "🔧 Mereset WinHTTP proxy..." -Color $Colors.Info
 		$proc = Start-Process netsh -ArgumentList "winhttp reset proxy" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
 		$results.ResetWinHttpProxy = if ($proc) { $proc.ExitCode } else { 0 }
 		Write-LogEntry "netsh winhttp reset proxy exitCode=$($results.ResetWinHttpProxy)" "INFO"
+		Write-ColorText "✅ WinHTTP proxy berhasil direset" -Color $Colors.Success
+		Start-Sleep -Seconds 1  # Delay untuk stabilitas
 	} catch { $results.ResetWinHttpProxy = -1; Write-LogEntry "Failed to reset WinHTTP proxy: $($_.Exception.Message)" "ERROR" }
 
 	# Optional: Winsock reset (but ask first, karena perlu restart)
@@ -1061,18 +1537,24 @@ function Invoke-NetworkSafePacket {
 	try {
 		$ans = if ($YesToAll) { 'Yes' } else { Confirm-ActionEx "Reset Winsock (rekomendasi, tidak berisiko, memerlukan restart)?" }
 		if ($ans -eq 'Yes') {
+			Write-ColorText "🔧 Mereset Winsock..." -Color $Colors.Info
 			$proc = Start-Process netsh -ArgumentList "winsock reset" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
 			$results.WinsockReset = if ($proc) { $proc.ExitCode } else { 0 }
 			Write-LogEntry "netsh winsock reset exitCode=$($results.WinsockReset)" "INFO"
+			Write-ColorText "✅ Winsock berhasil direset" -Color $Colors.Success
 			Write-ColorText "ℹ️ Perubahan Winsock akan berlaku setelah restart. Disarankan untuk me-restart perangkat." -Color $Colors.Warning
+			Start-Sleep -Seconds 2  # Delay untuk stabilitas
 		} else { $results.WinsockReset = 'Skipped' }
 	} catch { $results.WinsockReset = -1; Write-LogEntry "Failed to reset Winsock: $($_.Exception.Message)" "ERROR" }
 
 	# Cek port 5051
+	Write-ColorText "🔍 Memeriksa penggunaan port 5051..." -Color $Colors.Info
 	$portUsage = Get-Port5051Usage
 	$results.Port5051 = $portUsage
+	Start-Sleep -Seconds 1  # Delay untuk stabilitas
 
 	# Bersihkan cache Roblox dengan backup
+	Write-ColorText "🧹 Membersihkan cache Roblox (dengan backup)..." -Color $Colors.Info
 	$results.CacheCleaned = Clear-RobloxCacheWithBackup
 
 	return $results
@@ -1087,8 +1569,12 @@ function Show-NetworkPacketReport {
 	if ($PacketResults) {
 		Write-ColorText "• Flush DNS: $($PacketResults.FlushDNS)" -Color $Colors.Info
 		Write-LogEntry ("Report: FlushDNS=" + $PacketResults.FlushDNS) "INFO"
-		Write-ColorText "• Reset WinHTTP Proxy: $($PacketResults.ResetWinHttpProxy)" -Color $Colors.Info
-		Write-LogEntry ("Report: ResetWinHTTPProxy=" + $PacketResults.ResetWinHttpProxy) "INFO"
+		Write-ColorText "• Release IP: $($PacketResults.ReleaseIP)" -Color $Colors.Info
+		Write-LogEntry ("Report: ReleaseIP=" + $PacketResults.ReleaseIP) "INFO"
+		Write-ColorText "• Renew IP: $($PacketResults.RenewIP)" -Color $Colors.Info
+		Write-LogEntry ("Report: RenewIP=" + $PacketResults.RenewIP) "INFO"
+		Write-ColorText "• Reset WinHTTP Proxy: $($PacketResults.ResetWinHTTPProxy)" -Color $Colors.Info
+		Write-LogEntry ("Report: ResetWinHTTPProxy=" + $PacketResults.ResetWinHTTPProxy) "INFO"
 		Write-ColorText "• Winsock Reset: $($PacketResults.WinsockReset)" -Color $Colors.Info
 		Write-LogEntry ("Report: WinsockReset=" + $PacketResults.WinsockReset) "INFO"
 		Write-ColorText "• Cache Roblox dibersihkan (lokasi): $($PacketResults.CacheCleaned)" -Color $Colors.Info
@@ -1099,6 +1585,14 @@ function Show-NetworkPacketReport {
 		$warpStatus = if ($WarpInstallResult.Installed) { 'Terpasang' } else { 'Gagal/Skip' }
 		Write-ColorText "• Cloudflare WARP: $warpStatus (method=$($WarpInstallResult.Method), code=$($WarpInstallResult.ExitCode))" -Color $Colors.Info
 		Write-LogEntry ("Report: WARP status=" + $warpStatus + ", method=" + $WarpInstallResult.Method + ", code=" + $WarpInstallResult.ExitCode) "INFO"
+		
+		# Tambahkan info WARP VPN jika ada
+		if ($WarpInstallResult.VPNConnection) {
+			$vpnStatus = if ($WarpInstallResult.VPNConnection.Connected) { 'Tersambung' } else { 'Gagal' }
+			$vpnColor = if ($WarpInstallResult.VPNConnection.Connected) { $Colors.Success } else { $Colors.Warning }
+			Write-ColorText "• WARP VPN: $vpnStatus (PID=$($WarpInstallResult.VPNConnection.PID), Service=$($WarpInstallResult.VPNConnection.Service))" -Color $vpnColor
+			Write-LogEntry ("Report: WARP VPN=" + $vpnStatus + ", PID=" + $WarpInstallResult.VPNConnection.PID + ", Service=" + $WarpInstallResult.VPNConnection.Service) "INFO"
+		}
 	}
 	
 	Write-ColorText "`n🔎 Port 5051" -Color $Colors.Header
@@ -1206,6 +1700,17 @@ function Invoke-NetworkAndStabilityFix {
 		# Install WARP
 		$ans = Confirm-ActionEx "Install Cloudflare WARP (1.1.1.1)?"
 		if ($ans -eq 'Yes') { $warp = Install-CloudflareWARP } else { $warp = @{ Installed = $false; Method = 'Skipped'; File = $null; ExitCode = $null } }
+
+		# Jalankan WARP VPN (jika WARP terinstall)
+		if ($warp.Installed) {
+			$ans = Confirm-ActionEx "Jalankan WARP VPN (auto-connect)?"
+			if ($ans -eq 'Yes') { 
+				$warpConnection = Start-CloudflareWARP
+				$warp.VPNConnection = $warpConnection
+			} else { 
+				$warp.VPNConnection = $null 
+			}
+		}
 
 		# Deteksi aplikasi konflik
 		$ans = Confirm-ActionEx "Jalankan deteksi aplikasi konflik (G HUB/RTSS/Afterburner/Crucial)?"
@@ -1734,6 +2239,20 @@ function Register-CleanupHandlers {
 
 function Main {
 	try {
+		# Check admin privileges first
+		if (-not (Test-AdminPrivileges)) {
+			Write-ColorText "🔐 Program memerlukan hak akses Administrator" -Color $Colors.Warning
+			Write-ColorText "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -Color $Colors.Info
+			$elevate = Read-Host "Apakah ingin menjalankan sebagai Administrator? (Y/N)"
+			if ($elevate -eq 'Y' -or $elevate -eq 'y') {
+				Request-AdminElevation
+			} else {
+				Write-ColorText "⚠️ Program akan berjalan dengan fitur terbatas" -Color $Colors.Warning
+			}
+		} else {
+			Write-ColorText "✅ Berjalan dengan hak akses Administrator" -Color $Colors.Success
+		}
+		
 		Initialize-Environment
 		Register-CleanupHandlers
 		$originalPolicy = Set-ExecutionPolicyTemporary
