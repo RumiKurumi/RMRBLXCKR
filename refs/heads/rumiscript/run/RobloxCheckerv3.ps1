@@ -24,7 +24,7 @@ $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 
 # Global Variables
-$Global:ScriptVersion = "2.0.0"
+$Global:ScriptVersion = "3.2.1 - Build STABLE"
 $Global:ScriptName = "Roblox Checker by Rumi"
 $Global:LogFile = ""
 $Global:TempFiles = @()
@@ -206,8 +206,8 @@ function Request-AdminElevation {
         Write-Host "🔐 Program memerlukan hak akses Administrator" -ForegroundColor Yellow
         Write-Host "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -ForegroundColor Cyan
         Write-Host "💡 Jalankan PowerShell/Terminal sebagai Administrator dan jalankan script ini lagi" -ForegroundColor Cyan
-        Write-Host "⏳ Program akan menutup dalam 2 detik..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
+        Write-Host "⏳ Memanggil clean up dalam 4 detik..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 4
         exit 1
     } catch {
         Write-Host ("❌ Error: {0}" -f ($_.Exception.Message)) -ForegroundColor Red
@@ -812,12 +812,14 @@ function Show-LoadingBar {
 function Show-Header {
 	Clear-Host
 	$greeting = Get-TimeBasedGreeting
-	Write-TypewriterText "╔══════════════════════════════════════════════════════════════╗" $Colors.Header 2
-	Write-TypewriterText "║                                                              ║" $Colors.Header 2
-	Write-TypewriterText "║               🎮 ROBLOX CHECKER BY RUMI 🎮                   ║" $Colors.Header 2
-	Write-TypewriterText "║                    Version $Global:ScriptVersion                             ║" $Colors.Header 2
-	Write-TypewriterText "║                                                              ║" $Colors.Header 2
-	Write-TypewriterText "╚══════════════════════════════════════════════════════════════╝" $Colors.Header 2
+
+    # Decorative, multi-color, emoji-rich header
+    Write-TypewriterText "🟡★══════════════════════════════════════════════════════════════★🟡" $Colors.Accent 2
+    Write-TypewriterText "║   ✨                                                    ✨   ║" $Colors.Header 2
+    Write-TypewriterText "║   🎮  ROBLOX CHECKER BY RUMI  🛡️                        ║" $Colors.Header 2
+    Write-TypewriterText "║   🏷️  Version $Global:ScriptVersion                                 ║" $Colors.Header 2
+    Write-TypewriterText "║   ✨                                                    ✨   ║" $Colors.Header 2
+    Write-TypewriterText "🟡★══════════════════════════════════════════════════════════════★🟡" $Colors.Accent 2
 	Write-Host ""
 	Write-TypewriterText $greeting $Colors.Info 5
 	Write-ColorText "Waktu: $(Get-Date -Format 'dddd, dd MMMM yyyy HH:mm:ss')" -Color $Colors.Info
