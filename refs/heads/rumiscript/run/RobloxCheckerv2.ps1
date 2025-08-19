@@ -44,6 +44,11 @@ $Colors = @{
 # ==================== WINDOWS COMPATIBILITY CHECK ====================
 
 function Test-WindowsCompatibility {
+	# Debug: Show we're in Test-WindowsCompatibility
+	if ($Global:IsElevatedProcess) {
+		Write-Host "🔧 Test-WindowsCompatibility: Starting..." -ForegroundColor Yellow
+	}
+	
 	$compatibility = @{
 		OSVersion = $null
 		OSBuild = $null
@@ -58,10 +63,34 @@ function Test-WindowsCompatibility {
 	}
 	
 	try {
+		# Debug: Show we're getting OS info
+		if ($Global:IsElevatedProcess) {
+			Write-Host "🔧 Test-WindowsCompatibility: Getting OS info..." -ForegroundColor Yellow
+		}
+		
 		# Get OS info using CIM (preferred) with WMI fallback
-		$os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+		try {
+			$os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+			if ($Global:IsElevatedProcess) {
+				Write-Host "🔧 Test-WindowsCompatibility: CIM query completed" -ForegroundColor Green
+			}
+		} catch {
+			if ($Global:IsElevatedProcess) {
+				Write-Host "⚠️ Test-WindowsCompatibility: CIM failed, trying WMI..." -ForegroundColor Yellow
+			}
+		}
+		
 		if (-not $os) {
-			$os = Get-WmiObject -Class Win32_OperatingSystem -ErrorAction SilentlyContinue
+			try {
+				$os = Get-WmiObject -Class Win32_OperatingSystem -ErrorAction SilentlyContinue
+				if ($Global:IsElevatedProcess) {
+					Write-Host "🔧 Test-WindowsCompatibility: WMI query completed" -ForegroundColor Green
+				}
+			} catch {
+				if ($Global:IsElevatedProcess) {
+					Write-Host "❌ Test-WindowsCompatibility: Both CIM and WMI failed" -ForegroundColor Red
+				}
+			}
 		}
 		
 		if ($os) {
@@ -610,15 +639,37 @@ function Get-TimeBasedGreeting {
 }
 
 function Initialize-Environment {
+	# Debug: Show we're in Initialize-Environment
+	if ($Global:IsElevatedProcess) {
+		Write-Host "🔧 Initialize-Environment: Starting..." -ForegroundColor Yellow
+	}
+	
 	# Initialize logging first before any other operations
 	try {
 		Write-LogEntry "Initializing Roblox Checker environment" "INFO"
+		if ($Global:IsElevatedProcess) {
+			Write-Host "🔧 Initialize-Environment: Logging initialized" -ForegroundColor Green
+		}
 	} catch {
-		# Silent fallback - logging not ready yet
+		Write-Host "⚠️ Initialize-Environment: Logging error - $($_.Exception.Message)" -ForegroundColor Red
+		Start-Sleep -Seconds 1
 	}
 	
 	# Check Windows compatibility first
-	$Global:WindowsCompatibility = Test-WindowsCompatibility
+	if ($Global:IsElevatedProcess) {
+		Write-Host "🔧 Initialize-Environment: Testing Windows compatibility..." -ForegroundColor Yellow
+	}
+	
+	try {
+		$Global:WindowsCompatibility = Test-WindowsCompatibility
+		if ($Global:IsElevatedProcess) {
+			Write-Host "🔧 Initialize-Environment: Windows compatibility test completed" -ForegroundColor Green
+		}
+	} catch {
+		Write-Host "❌ Initialize-Environment: Windows compatibility test failed - $($_.Exception.Message)" -ForegroundColor Red
+		Start-Sleep -Seconds 2
+		throw
+	}
 	
 	# Display compatibility info
 	Write-ColorText "🔍 Deteksi Kompatibilitas Windows..." -Color $Colors.Info
@@ -2755,6 +2806,12 @@ function Register-CleanupHandlers {
 
 function Main {
 	try {
+		# Debug: Show we're in Main function
+		if ($Global:IsElevatedProcess) {
+			Write-Host "🔧 Main function started in elevated mode" -ForegroundColor Green
+			Start-Sleep -Seconds 1
+		}
+		
 		# Check admin privileges first
 		if (-not (Test-AdminPrivileges)) {
 			Write-ColorText "🔐 Program memerlukan hak akses Administrator" -Color $Colors.Warning
@@ -2782,10 +2839,30 @@ function Main {
 			Write-LogEntry "Elevated process started successfully" "INFO"
 		}
 		
+		# Debug: Step-by-step initialization
+		if ($Global:IsElevatedProcess) {
+			Write-Host "🔧 Step 1: Initializing environment..." -ForegroundColor Yellow
+		}
 		Initialize-Environment
+		
+		if ($Global:IsElevatedProcess) {
+			Write-Host "🔧 Step 2: Registering cleanup handlers..." -ForegroundColor Yellow
+		}
 		Register-CleanupHandlers
+		
+		if ($Global:IsElevatedProcess) {
+			Write-Host "🔧 Step 3: Setting execution policy..." -ForegroundColor Yellow
+		}
 		$originalPolicy = Set-ExecutionPolicyTemporary
-		Write-LogEntry "Main menu started" "INFO"
+		
+		if ($Global:IsElevatedProcess) {
+			Write-Host "🔧 Step 4: Starting main menu..." -ForegroundColor Yellow
+		}
+		try {
+			Write-LogEntry "Main menu started" "INFO"
+		} catch {
+			Write-Host "⚠️ Logging error: $($_.Exception.Message)" -ForegroundColor Red
+		}
 		
 		do {
 			$menuOptions = @(
@@ -2854,42 +2931,70 @@ if ($PSVersionTable.PSVersion.Major -lt 4) {
 # Check if this is an elevated process
 $Global:IsElevatedProcess = $args -contains "-Elevated"
 
-# Debug: Show elevated status
+# Debug: Show elevated status with longer pause
 if ($Global:IsElevatedProcess) {
     try {
         Write-Host "🚀 Elevated process started successfully" -ForegroundColor Green
         Write-Host "📋 PowerShell Version: $($PSVersionTable.PSVersion)" -ForegroundColor Cyan
         Write-Host "🔐 Admin Rights: $(if (Test-AdminPrivileges) { 'Yes' } else { 'No' })" -ForegroundColor Cyan
-        Start-Sleep -Seconds 1
+        Write-Host "⏳ Initializing elevated environment..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
     } catch {
-        # Silent fallback
+        Write-Host "⚠️ Debug info error: $($_.Exception.Message)" -ForegroundColor Red
+        Start-Sleep -Seconds 3
     }
 }
 
 # Run main function
 if ($MyInvocation.InvocationName -ne '.') {
     try {
+        # Debug: Show we're about to start Main
+        if ($Global:IsElevatedProcess) {
+            Write-Host "🚀 About to start Main function..." -ForegroundColor Green
+            Start-Sleep -Seconds 1
+        }
+        
         Main
     } catch {
-        # Robust error handling for elevated process
-        try {
-            Write-ColorText "❌ Fatal error in main execution: $($_.Exception.Message)" -Color $Colors.Error
-        } catch {
-            Write-Host "❌ Fatal error in main execution: $($_.Exception.Message)" -ForegroundColor Red
+        # Enhanced error handling for elevated process
+        Write-Host "`n" -ForegroundColor Red
+        Write-Host "❌❌❌ FATAL ERROR DETECTED ❌❌❌" -ForegroundColor Red
+        Write-Host "================================================" -ForegroundColor Red
+        Write-Host "Error Type: $($_.Exception.GetType().Name)" -ForegroundColor Yellow
+        Write-Host "Error Message: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "Error Location: $($_.InvocationInfo.ScriptName):$($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor Yellow
+        Write-Host "================================================" -ForegroundColor Red
+        
+        # Show stack trace for debugging
+        Write-Host "`nStack Trace:" -ForegroundColor Cyan
+        $_.ScriptStackTrace -split "`n" | ForEach-Object {
+            Write-Host "  $_" -ForegroundColor Gray
         }
         
         try {
             Write-LogEntry "Fatal error: $($_.Exception.Message)" "ERROR"
         } catch {
-            # Silent fallback for logging
+            Write-Host "⚠️ Could not write to log file" -ForegroundColor Red
         }
         
-        # Give user time to see error before closing
+        # Give user plenty of time to read error
+        Write-Host "`n" -ForegroundColor Red
+        Write-Host "⏳ This window will close in 10 seconds..." -ForegroundColor Yellow
+        Write-Host "📋 You can copy the error message above" -ForegroundColor Yellow
+        
+        # Countdown
+        for ($i = 10; $i -gt 0; $i--) {
+            Write-Host "`rClosing in $i seconds... " -ForegroundColor Yellow -NoNewline
+            Start-Sleep -Seconds 1
+        }
+        Write-Host "`n" -ForegroundColor Yellow
+        
+        # Try to pause for user input
         try {
-            Write-Host "`nPress any key to continue..." -ForegroundColor Yellow
+            Write-Host "Press any key to close immediately..." -ForegroundColor Green
             $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         } catch {
-            Start-Sleep -Seconds 3
+            Write-Host "Auto-closing..." -ForegroundColor Gray
         }
     } finally {
         # Ensure clean exit
