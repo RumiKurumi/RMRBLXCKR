@@ -226,11 +226,11 @@ function Request-AdminElevation {
                 }
                 
                 # Start elevated process with downloaded script and elevation flag
-                Write-ColorText "🚀 Memulai proses elevated..." -Color $Colors.Info
+
                 Write-LogEntry "Starting elevated process with script: $tempScript" "INFO"
                 
                 # Start elevated process without waiting (non-blocking)
-                $process = Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScript`" -Elevated" -Verb RunAs -PassThru
+
                 
                 # Give elevated process time to start
                 Start-Sleep -Seconds 2
@@ -268,7 +268,7 @@ function Request-AdminElevation {
                     # Don't exit immediately, let user see the error
                     Write-ColorText "⏳ Program akan melanjutkan dengan fitur terbatas..." -Color $Colors.Info
                     Start-Sleep -Seconds 3
-                    return @{ Installed = $false; Method = 'ElevationFailed'; File = $tempScript; ExitCode = -1 }
+
 
 }
 
