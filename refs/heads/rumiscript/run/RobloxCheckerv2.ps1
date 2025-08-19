@@ -368,44 +368,51 @@ function Show-LoadingSpinner {
     Write-Host ""
 }
 
-# Banner khusus untuk instalasi WARP (ASCII art + subtitle berwarna accent)
+# Banner khusus untuk instalasi WARP (simplified dan clean)
 function Show-WarpInstallBanner {
 	param(
 		[string]$Subtitle = "Silent Warping, harap tunggu gess.."
 	)
 
+	# Simplified banner yang lebih clean dan tidak ada artifact
 	$banner = @"
- ███████████                               ███                          
-░░███░░░░░███                             ░░░                           
- ░███    ░███  █████ ████ █████████████   ████                          
- ░██████████  ░░███ ░███ ░░███░░███░░███ ░░███                          
- ░███░░░░░███  ░███ ░███  ░███ ░███ ░███  ░███                          
- ░███    ░███  ░███ ░███  ░███ ░███ ░███  ░███                          
- █████   █████ ░░████████ █████░███ █████ █████                         
-░░░░░   ░░░░░   ░░░░░░░░ ░░░░░ ░░░ ░░░░░ ░░░░░                          
-   █████████  █████                        █████                        
-  ███░░░░░███░░███                        ░░███                         
- ███     ░░░  ░███████    ██████   ██████  ░███ █████  ██████  ████████ 
-░███          ░███░░███  ███░░███ ███░░███ ░███░░███  ███░░███░░███░░███
-░███          ░███ ░███ ░███████ ░███ ░░░  ░██████░  ░███████  ░███ ░░░ 
-░░███     ███ ░███ ░███ ░███░░░  ░███  ███ ░███░░███ ░███░░░   ░███     
- ░░█████████  ████ █████░░██████ ░░██████  ████ █████░░██████  █████    
-  ░░░░░░░░░  ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░ ░░░░░  ░░░░░░  ░░░░░     
+╔══════════════════════════════════════════════════════════════╗
+║                    🌐 CLOUDFLARE WARP 🌐                    ║
+║                                                              ║
+║                ██████████████████████████                   ║
+║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
+║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
+║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
+║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
+║                ██████████████████████████                   ║
+║                                                              ║
+║              🚀 SILENT INSTALLATION MODE                    ║
+╚══════════════════════════════════════════════════════════════╝
 "@
 
-	try { Clear-Host } catch {}
+	# Clean terminal redraw tanpa artifact
+	try { 
+		Clear-Host 
+		Start-Sleep -Milliseconds 100  # Small delay untuk stabilitas
+	} catch {}
+	
 	Write-ColorText $banner -Color $Colors.Accent
 	Write-Host ""
 	Write-ColorText ("🎯 " + $Subtitle) -Color $Colors.Accent
 	Write-Host ""
 }
 
-# Fungsi untuk menjalankan dan memverifikasi WARP VPN
+# Fungsi untuk menjalankan dan memverifikasi WARP VPN (simplified dan clean)
 function Start-CloudflareWARP {
 	param([switch]$WhatIf)
 	
 	Write-LogEntry "Starting Cloudflare WARP VPN" "INFO"
-	Write-ColorText "🌐 Menjalankan Cloudflare WARP VPN..." -Color $Colors.Info
+	
+	# Clean header untuk auto-connect section
+	Write-Host ""
+	Write-ColorText "🌐 AUTO-CONNECT WARP VPN" -Color $Colors.Header
+	Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+	Write-Host ""
 	
 	# Cek apakah WARP sudah terinstall
 	$warpInstalled = Test-CloudflareWARPInstalled
@@ -449,14 +456,16 @@ function Start-CloudflareWARP {
 		# Check if WARP needs registration
 		if ($initialStatus -like "*Registration Missing*" -or $initialStatus -like "*Manual deletion*" -or $initialStatus -like "*Unable*") {
 			Write-ColorText "⚠️ Auto-connect WARP gagal - Setup manual diperlukan" -Color $Colors.Warning
+			Write-Host ""
 			Write-ColorText "📋 Setup WARP secara manual:" -Color $Colors.Info
 			Write-ColorText "   1. WARP sudah running di system tray (kanan bawah)" -Color $Colors.Info
 			Write-ColorText "   2. Klik kanan icon WARP → 'Sign In' atau 'Enable WARP'" -Color $Colors.Info
 			Write-ColorText "   3. Ikuti wizard setup dan accept agreement" -Color $Colors.Info
 			Write-ColorText "   4. Setelah setup selesai, WARP akan otomatis connect" -Color $Colors.Info
-			
+			Write-Host ""
 			Write-ColorText "💡 WARP sudah running, setup dari system tray saja" -Color $Colors.Info
 			Write-ColorText "✅ Setelah setup manual selesai, WARP akan running otomatis" -Color $Colors.Success
+			Write-Host ""
 			return @{ Connected = $false; Method = 'NeedsManualSetup'; PID = $null; Service = $null; Status = $initialStatus }
 		}
 		
@@ -471,7 +480,7 @@ function Start-CloudflareWARP {
 		Write-ColorText "🔗 Menyambungkan ke WARP VPN..." -Color $Colors.Info
 		$proc = Start-Process $warpCliPath -ArgumentList "connect" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
 		
-		Start-Sleep -Seconds 5  # Tunggu koneksi stabil
+		Start-Sleep -Seconds 3  # Reduced delay untuk stabilitas
 		
 		# Verifikasi koneksi
 		Write-ColorText "🔍 Memverifikasi koneksi WARP..." -Color $Colors.Info
@@ -523,12 +532,35 @@ function Start-CloudflareWARP {
 			Write-ColorText "⚠️ WARP VPN gagal tersambung" -Color $Colors.Warning
 			Write-ColorText "📋 Status: $status" -Color $Colors.Info
 			Write-LogEntry "WARP VPN connection failed. Status: $status" "WARNING"
+			
+			# Clean footer untuk failed connection
+			Write-Host ""
+			Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+			Write-ColorText "❌ AUTO-CONNECT WARP GAGAL" -Color $Colors.Error
+			Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+			Write-Host ""
+			
 			return @{ Connected = $false; Method = 'ConnectionFailed'; PID = $null; Service = $null; Status = $status }
 		}
+		
+		# Clean footer untuk successful connection
+		Write-Host ""
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+		Write-ColorText "✅ AUTO-CONNECT WARP BERHASIL" -Color $Colors.Success
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+		Write-Host ""
 		
 	} catch {
 		Write-ColorText "❌ Error menjalankan WARP VPN: $($_.Exception.Message)" -Color $Colors.Error
 		Write-LogEntry "Error starting WARP VPN: $($_.Exception.Message)" "ERROR"
+		
+		# Clean footer untuk error
+		Write-Host ""
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+		Write-ColorText "❌ AUTO-CONNECT WARP ERROR" -Color $Colors.Error
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+		Write-Host ""
+		
 		return @{ Connected = $false; Method = 'Error'; PID = $null; Service = $null }
 	}
 }
@@ -1566,7 +1598,7 @@ function Install-CloudflareWARP {
 	
 	# Tampilkan banner instalasi khusus WARP
 	Show-WarpInstallBanner "Silent Warping, harap tunggu gess.."
-	Start-Sleep -Seconds 2  # Delay sebelum install
+	Start-Sleep -Seconds 1  # Reduced delay untuk transisi yang lebih smooth
 	
 	try {
 		Write-ColorText "🔧 Memulai instalasi silent..." -Color $Colors.Info
@@ -1611,7 +1643,7 @@ function Install-CloudflareWARP {
 			$exitCode = $proc.ExitCode
 		}
 		
-		Start-Sleep -Seconds 3  # Delay setelah install untuk stabilitas
+		Start-Sleep -Seconds 2  # Reduced delay untuk stabilitas
 		
 		# Verifikasi instalasi
 		Write-ColorText "🔍 Memverifikasi instalasi..." -Color $Colors.Info
@@ -1645,8 +1677,12 @@ function Install-CloudflareWARP {
 		return @{ Installed = $false; Method = $method; File = $targetFile; ExitCode = -2 }
 	}
 	
-	# Sembunyikan banner dan kembali ke tampilan normal
-	try { Clear-Host } catch {}
+	# Smooth transition dari banner ke tampilan normal (tanpa Clear-Host yang kasar)
+	Write-Host ""
+	Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+	Write-ColorText "🎯 INSTALASI WARP SELESAI - TRANSISI KE AUTO-CONNECT" -Color $Colors.Success
+	Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+	Write-Host ""
 	return @{ 
 		Installed = ($exitCode -eq 0); 
 		Method = $method; 
@@ -1813,8 +1849,11 @@ function Show-NetworkPacketReport {
 }
 
 function Invoke-NetworkAndStabilityFix {
-	Clear-Host
+	# Clean header tanpa Clear-Host untuk menghindari artifact
+	Write-Host ""
 	Write-ColorText "🔧 MEMULAI: Perbaikan Jaringan Aman + WARP + Cek Konflik" -Color $Colors.Header
+	Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+	Write-Host ""
 
 	# Pilih mode: Yes to all atau Step-by-step
 	Write-ColorText "Pilih mode (A=Yes to all / S=Step-by-step): " -Color $Colors.Warning -NoNewLine
@@ -1831,14 +1870,26 @@ function Invoke-NetworkAndStabilityFix {
 
 	if ($mode -eq 'All') {
 		# Jalankan semua tanpa konfirmasi tambahan
+		Write-Host ""
+		Write-ColorText "🚀 MODE: Yes to All - Menjalankan semua proses otomatis" -Color $Colors.Success
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+		Write-Host ""
+		
 		$packet = Invoke-NetworkSafePacket -YesToAll
 		$warp = Install-CloudflareWARP
 		$conflicts = Find-ConflictingApps
 	} else {
 		# Step-by-step: konfirmasi tiap proses
+		Write-Host ""
+		Write-ColorText "🔍 MODE: Step-by-step - Konfirmasi setiap proses" -Color $Colors.Info
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+		Write-Host ""
+		
 		$packet = [ordered]@{ FlushDNS=$null; ResetWinHttpProxy=$null; WinsockReset=$null; CacheCleaned=0; Port5051=@() }
 
 		# Flush DNS
+		Write-ColorText "🔧 PROSES 1: Flush DNS Cache" -Color $Colors.Header
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
 		$ans = Confirm-ActionEx "Jalankan ipconfig /flushdns?"
 		if ($ans -eq 'Yes') {
 			try { $p = Start-Process ipconfig -ArgumentList "/flushdns" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue; $packet.FlushDNS = if ($p){$p.ExitCode}else{0} } catch { $packet.FlushDNS = -1 }
@@ -1846,6 +1897,9 @@ function Invoke-NetworkAndStabilityFix {
 		} else { $packet.FlushDNS = 'Skipped' }
 
 		# Reset WinHTTP proxy
+		Write-Host ""
+		Write-ColorText "🔧 PROSES 2: Reset WinHTTP Proxy" -Color $Colors.Header
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
 		$ans = Confirm-ActionEx "Reset WinHTTP proxy (netsh winhttp reset proxy)?"
 		if ($ans -eq 'Yes') {
 			try { $p = Start-Process netsh -ArgumentList "winhttp reset proxy" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue; $packet.ResetWinHttpProxy = if ($p){$p.ExitCode}else{0} } catch { $packet.ResetWinHttpProxy = -1 }
@@ -1853,6 +1907,9 @@ function Invoke-NetworkAndStabilityFix {
 		} else { $packet.ResetWinHttpProxy = 'Skipped' }
 
 		# Winsock reset
+		Write-Host ""
+		Write-ColorText "🔧 PROSES 3: Reset Winsock" -Color $Colors.Header
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
 		$ans = Confirm-ActionEx "Reset Winsock (butuh restart setelahnya)?"
 		if ($ans -eq 'Yes') {
 			try { $p = Start-Process netsh -ArgumentList "winsock reset" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue; $packet.WinsockReset = if ($p){$p.ExitCode}else{0} } catch { $packet.WinsockReset = -1 }
@@ -1861,19 +1918,31 @@ function Invoke-NetworkAndStabilityFix {
 		} else { $packet.WinsockReset = 'Skipped' }
 
 		# Clean cache dengan backup
+		Write-Host ""
+		Write-ColorText "🔧 PROSES 4: Clean Cache Roblox" -Color $Colors.Header
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
 		$ans = Confirm-ActionEx "Bersihkan cache Roblox dengan backup?"
 		if ($ans -eq 'Yes') { $packet.CacheCleaned = Clear-RobloxCacheWithBackup } else { $packet.CacheCleaned = 0 }
 
 		# Cek port 5051
+		Write-Host ""
+		Write-ColorText "🔧 PROSES 5: Cek Port 5051" -Color $Colors.Header
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
 		$ans = Confirm-ActionEx "Cek port 5051 dan proses yang memakainya?"
 		if ($ans -eq 'Yes') { $packet.Port5051 = Get-Port5051Usage } else { $packet.Port5051 = @() }
 
 		# Install WARP
+		Write-Host ""
+		Write-ColorText "🔧 PROSES 6: Install Cloudflare WARP" -Color $Colors.Header
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
 		$ans = Confirm-ActionEx "Install Cloudflare WARP (1.1.1.1)?"
 		if ($ans -eq 'Yes') { $warp = Install-CloudflareWARP } else { $warp = @{ Installed = $false; Method = 'Skipped'; File = $null; ExitCode = $null } }
 
 		# Jalankan WARP VPN (jika WARP terinstall)
 		if ($warp.Installed) {
+			Write-Host ""
+			Write-ColorText "🔧 PROSES 7: Auto-Connect WARP VPN" -Color $Colors.Header
+			Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
 			$ans = Confirm-ActionEx "Jalankan WARP VPN (auto-connect)?"
 			if ($ans -eq 'Yes') { 
 				$warpConnection = Start-CloudflareWARP
@@ -1884,34 +1953,24 @@ function Invoke-NetworkAndStabilityFix {
 		}
 
 		# Deteksi aplikasi konflik
+		Write-Host ""
+		Write-ColorText "🔧 PROSES 8: Deteksi Aplikasi Konflik" -Color $Colors.Header
+		Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
 		$ans = Confirm-ActionEx "Jalankan deteksi aplikasi konflik (G HUB/RTSS/Afterburner/Crucial)?"
 		if ($ans -eq 'Yes') { $conflicts = Find-ConflictingApps } else { $conflicts = @{ RunningProcesses=@(); InstalledApps=@(); Services=@() } }
 	}
 
+	# Tampilkan report final
+	Write-Host ""
+	Write-ColorText "📋 LAPORAN FINAL: Perbaikan Jaringan & Stabilitas" -Color $Colors.Header
+	Write-ColorText "══════════════════════════════════════════════════════════════" -Color $Colors.Header
+	Write-Host ""
+	
 	Show-NetworkPacketReport -PacketResults $packet -WarpInstallResult $warp -ConflictingApps $conflicts
 }
 
-function Invoke-SafePacketOnly {
-	param([switch]$YesToAll)
-	Clear-Host
-	Write-ColorText "🔒 MEMULAI: Safe Net Packet saja" -Color $Colors.Header
-	$packet = Invoke-NetworkSafePacket -YesToAll:$YesToAll
-	Show-NetworkPacketReport -PacketResults $packet -WarpInstallResult $null -ConflictingApps $null
-}
-
-function Invoke-ConflictsCheckOnly {
-	Clear-Host
-	Write-ColorText "🔍 MEMULAI: Cek Aplikasi/Service Konflik saja" -Color $Colors.Header
-	$conflicts = Find-ConflictingApps
-	Show-NetworkPacketReport -PacketResults $null -WarpInstallResult $null -ConflictingApps $conflicts
-}
-
-function Invoke-WarpInstallOnly {
-	Clear-Host
-	Write-ColorText "☁️ MEMULAI: Install Cloudflare WARP saja" -Color $Colors.Header
-	$warp = Install-CloudflareWARP
-	Show-NetworkPacketReport -PacketResults $null -WarpInstallResult $warp -ConflictingApps $null
-}
+# Fungsi-fungsi ini sudah tidak digunakan karena digabung dalam Invoke-NetworkAndStabilityFix
+# Dihapus untuk menghindari duplikasi dan confusion
 
 # ==================== REPORT FUNCTIONS ====================
 
