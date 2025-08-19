@@ -469,11 +469,11 @@ function Start-CloudflareWARP {
 			Write-Host ""
 			Write-ColorText "📋 Setup WARP secara manual:" -Color $Colors.Info
 			Write-ColorText "   1. WARP sudah running di system tray (kanan bawah)" -Color $Colors.Info
-			Write-ColorText "   2. Klik kanan icon WARP → 'Sign In' atau 'Enable WARP'" -Color $Colors.Info
-			Write-ColorText "   3. Ikuti wizard setup dan accept agreement" -Color $Colors.Info
-			Write-ColorText "   4. Setelah setup selesai, WARP akan otomatis connect" -Color $Colors.Info
+			Write-ColorText "   2. Klik system tray nya nanti ada icon WARP bentuknya awan ☁️" -Color $Colors.Info
+			Write-ColorText "   3. Ikuti wizard setupnya klik 'Next' dan 'Accept' agreement" -Color $Colors.Info
+			Write-ColorText "   4. Setelah setup selesai, WARP akan otomatis connect (Tapi Kalo Disconnected, nyalain aja klik toggle buttonnya)" -Color $Colors.Info
 			Write-Host ""
-			Write-ColorText "💡 WARP sudah running, setup dari system tray saja" -Color $Colors.Info
+			Write-ColorText "💡 WARP sudah running, setupnya dari system tray saja" -Color $Colors.Info
 			Write-ColorText "✅ Setelah setup manual selesai, WARP akan running otomatis" -Color $Colors.Success
 			Write-Host ""
 			return @{ Connected = $false; Method = 'NeedsManualSetup'; PID = $null; Service = $null; Status = $initialStatus }
