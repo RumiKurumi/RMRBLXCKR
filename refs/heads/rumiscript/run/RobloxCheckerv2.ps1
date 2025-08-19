@@ -7,7 +7,7 @@
     Mendukung semua versi Windows dengan safety measures dan secure by design
 .NOTES
     Version: 2.0
-    Author: RumiKurumi
+    Author: Rumi
     Compatible: Windows 7/8/8.1/10/11 (x86/x64/ARM64)
     Full Support: Windows 10 Build 1507+ / Windows 11 All Builds
 #>
@@ -164,24 +164,43 @@ function Test-AdminPrivileges {
 
 function Request-AdminElevation {
     try {
-        # Get current script path
+        Write-ColorText "🔐 Meminta elevation UAC..." -Color $Colors.Info
+        
+        # Check if running from irm | iex (no local file)
         $scriptPath = $MyInvocation.MyCommand.Path
         if (-not $scriptPath) { $scriptPath = $PSCommandPath }
-        if (-not $scriptPath) { 
-            Write-ColorText "❌ Tidak dapat menentukan path script" -Color $Colors.Error
-            exit 1
+        
+        if (-not $scriptPath) {
+            # Running from irm | iex - download and run elevated
+            Write-ColorText "📥 Script dijalankan dari remote, mendownload untuk elevation..." -Color $Colors.Info
+            Write-LogEntry "Script running from remote, downloading for elevation" "INFO"
+            
+            $tempScript = "$env:TEMP\RobloxChecker_Elevated.ps1"
+            $scriptUrl = "https://raw.githubusercontent.com/RumiKurumi/RMRBLXCKR/refs/heads/main/refs/heads/rumiscript/run/RobloxCheckerv2.ps1"
+            
+            try {
+                Invoke-WebRequest -Uri $scriptUrl -OutFile $tempScript -UseBasicParsing
+                Write-LogEntry "Downloaded script to: $tempScript" "INFO"
+                
+                # Start elevated process with downloaded script
+                Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScript`"" -Verb RunAs -Wait
+                exit 0
+            } catch {
+                Write-ColorText "❌ Gagal download script untuk elevation: $($_.Exception.Message)" -Color $Colors.Error
+                Write-LogEntry "Failed to download script for elevation: $($_.Exception.Message)" "ERROR"
+                throw
+            }
+        } else {
+            # Running from local file
+            Write-LogEntry "Requesting admin elevation for local script: $scriptPath" "INFO"
+            Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -Wait
+            exit 0
         }
-        
-        Write-ColorText "🔐 Meminta elevation UAC..." -Color $Colors.Info
-        Write-LogEntry "Requesting admin elevation for script: $scriptPath" "INFO"
-        
-        # Start new elevated process and exit current one
-        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -Wait
-        exit 0
     } catch {
         Write-ColorText "❌ Gagal meminta elevation admin: $($_.Exception.Message)" -Color $Colors.Error
         Write-LogEntry "Admin elevation failed: $($_.Exception.Message)" "ERROR"
         Write-ColorText "💡 Jalankan PowerShell sebagai Administrator dan jalankan script ini lagi" -Color $Colors.Info
+        Write-ColorText "🔗 Atau download manual dari: https://github.com/RumiKurumi/RMRBLXCKR" -Color $Colors.Info
         Read-Host "Tekan Enter untuk keluar"
         exit 1
     }
@@ -2025,6 +2044,55 @@ function Show-Goodbye {
 	Write-ColorText "Sampai jumpa! 👋" -Color $Colors.Success
 }
 
+function Show-CountdownAndClose {
+    param(
+        [int]$Seconds = 5
+    )
+    
+    Write-Host ""
+    Write-ColorText "⏰ Program akan menutup dalam beberapa detik..." -Color $Colors.Warning
+    
+    for ($i = $Seconds; $i -gt 0; $i--) {
+        Write-ColorText "`r🔄 Menutup dalam $i detik..." -Color $Colors.Accent -NoNewLine
+        Start-Sleep -Seconds 1
+    }
+    
+    Write-Host ""
+    Write-ColorText "👋 Menutup program..." -Color $Colors.Success
+    Write-LogEntry "Auto-closing terminal after $Seconds seconds countdown" "INFO"
+    
+    # Close the terminal window
+    try {
+        $host.UI.RawUI.WindowTitle = "Roblox Checker - Closing..."
+        Start-Sleep -Milliseconds 500
+        
+        # Try multiple methods to close terminal
+        try {
+            # Method 1: Close PowerShell process
+            $currentProcess = Get-Process -Id $PID
+            $currentProcess.CloseMainWindow()
+        } catch {
+            try {
+                # Method 2: Exit PowerShell
+                exit 0
+            } catch {
+                try {
+                    # Method 3: Force close
+                    Stop-Process -Id $PID -Force
+                } catch {
+                    # Method 4: Close console window
+                    Add-Type -AssemblyName System.Windows.Forms
+                    [System.Windows.Forms.Application]::Exit()
+                }
+            }
+        }
+    } catch {
+        Write-LogEntry "Failed to auto-close terminal: $($_.Exception.Message)" "WARNING"
+        Write-ColorText "💡 Tekan Enter untuk menutup manual..." -Color $Colors.Info
+        Read-Host | Out-Null
+    }
+}
+
 # ==================== INTERACTIVE FUNCTIONS ====================
 
 function Reset-Header {
@@ -2233,6 +2301,9 @@ function Register-CleanupHandlers {
     Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
         Write-Host "`n🛑 Pembatalan terdeteksi, melakukan cleanup..." -ForegroundColor $Colors.Warning
         Invoke-SafetyCleanup
+        # Auto-close after cleanup
+        Start-Sleep -Seconds 2
+        try { exit 0 } catch {}
     } | Out-Null
     
     # Register exit handler
@@ -2308,6 +2379,9 @@ function Main {
 		if ($originalPolicy) { Restore-ExecutionPolicy -OriginalPolicy $originalPolicy }
 		Write-LogEntry "=== ROBLOX CHECKER SESSION ENDED ===" "INFO"
 		Show-Goodbye
+		
+		# Auto-close terminal dengan countdown
+		Show-CountdownAndClose -Seconds 5
 	}
 }
 
