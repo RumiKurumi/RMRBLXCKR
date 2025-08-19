@@ -342,11 +342,28 @@ function Write-LogEntry {
     param(
         [string]$Message,
         [ValidateSet('INFO', 'WARNING', 'ERROR', 'DEBUG', 'SUCCESS')]
-        [string]$Level = 'INFO'
+        [string]$Level = 'INFO',
+        [hashtable]$AdditionalData = @{},
+        [string]$FunctionName = $null,
+        [string]$ProcessName = $null
     )
     
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logEntry = "[$timestamp] [$Level] $Message"
+    $functionInfo = if ($FunctionName) { "[$FunctionName]" } else { "" }
+    $processInfo = if ($ProcessName) { "[$ProcessName]" } else { "" }
+    
+    # Enhanced log entry with function and process context
+    $logEntry = "[$timestamp] [$Level]$functionInfo$processInfo $Message"
+    
+    # Add additional data if provided
+    if ($AdditionalData.Count -gt 0) {
+        try {
+            $jsonData = $AdditionalData | ConvertTo-Json -Compress -Depth 3
+            $logEntry += " | Data: $jsonData"
+        } catch {
+            $logEntry += " | Data: [Error serializing data]"
+        }
+    }
     
     # Robust logging - handle cases where LogFile is not yet initialized
     if ($Global:LogFile -and $Global:LogFile -ne "" -and (Test-Path (Split-Path $Global:LogFile -Parent))) {
@@ -369,6 +386,62 @@ function Write-LogEntry {
     if ($Debug -and $Level -eq 'DEBUG') {
         Write-ColorText "DEBUG: $Message" -Color $Colors.Debug
     }
+}
+
+# Enhanced logging function for detailed process results
+function Write-ProcessLog {
+    param(
+        [string]$ProcessName,
+        [string]$Action,
+        [string]$Status,
+        [hashtable]$Results = @{},
+        [string]$ErrorMessage = $null,
+        [int]$Duration = 0
+    )
+    
+    $logData = @{
+        Process = $ProcessName
+        Action = $Action
+        Status = $Status
+        Duration = $Duration
+        Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    }
+    
+    if ($Results.Count -gt 0) {
+        $logData.Results = $Results
+    }
+    
+    if ($ErrorMessage) {
+        $logData.Error = $ErrorMessage
+    }
+    
+    $logMessage = "$ProcessName - $Action`: $Status"
+    if ($Duration -gt 0) {
+        $logMessage += " ($($Duration)ms)"
+    }
+    
+    Write-LogEntry -Message $logMessage -Level "INFO" -AdditionalData $logData -FunctionName $ProcessName
+}
+
+# Enhanced logging function for system information
+function Write-SystemLog {
+    param(
+        [string]$Component,
+        [string]$Action,
+        [hashtable]$SystemData = @{},
+        [string]$Status = "Completed"
+    )
+    
+    $logData = @{
+        Component = $Component
+        Action = $Action
+        Status = $Status
+        SystemInfo = $SystemData
+        Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    }
+    
+    $logMessage = "$Component - $Action`: $Status"
+    Write-LogEntry -Message $logMessage -Level "INFO" -AdditionalData $logData -FunctionName "SystemLogger"
 }
 
 function Show-LoadingSpinner {
@@ -845,7 +918,8 @@ function Test-RobloxConnectivity {
 # ==================== SYSTEM DETECTION FUNCTIONS ====================
 
 function Get-SystemInfo {
-    Write-LogEntry "Collecting system information" "INFO"
+    $startTime = Get-Date
+    Write-LogEntry "Collecting system information" "INFO" -FunctionName "Get-SystemInfo"
     Show-ProgressBar -Activity "Mengumpulkan Informasi Sistem" -Status "Mendapatkan detail sistem..." -PercentComplete 10
     
     try {
@@ -859,17 +933,94 @@ function Get-SystemInfo {
         # Get CPU cores if available
         if ($Global:WindowsCompatibility.SupportsCIM) {
             $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction SilentlyContinue
+            if ($cpu) {
+                $systemInfo.CPUCores = $cpu.NumberOfCores
+                $systemInfo.CPUThreads = $cpu.NumberOfLogicalProcessors
+                $systemInfo.CPUMaxClockSpeed = $cpu.MaxClockSpeed
+                Write-LogEntry "CPU info collected via CIM" "INFO" -FunctionName "Get-SystemInfo" -AdditionalData @{
+                    Cores = $cpu.NumberOfCores
+                    Threads = $cpu.NumberOfLogicalProcessors
+                    MaxClockSpeed = $cpu.MaxClockSpeed
+                    Name = $cpu.Name
+                }
+            }
         } else {
             $cpu = Get-WmiObject -Class Win32_Processor -ErrorAction SilentlyContinue
-        }
-        if ($cpu) {
-            $systemInfo.CPUCores = $cpu.NumberOfCores
+            if ($cpu) {
+                $systemInfo.CPUCores = $cpu.NumberOfCores
+                $systemInfo.CPUThreads = $cpu.NumberOfLogicalProcessors
+                $systemInfo.CPUMaxClockSpeed = $cpu.MaxClockSpeed
+                Write-LogEntry "CPU info collected via WMI" "INFO" -FunctionName "Get-SystemInfo" -AdditionalData @{
+                    Cores = $cpu.NumberOfCores
+                    Threads = $cpu.NumberOfLogicalProcessors
+                    MaxClockSpeed = $cpu.MaxClockSpeed
+                    Name = $cpu.Name
+                }
+            }
         }
         
-        Write-LogEntry "System info collected successfully" "SUCCESS"
+        # Get additional system details
+        try {
+            $memory = Get-WmiObject -Class Win32_PhysicalMemory -ErrorAction SilentlyContinue
+            if ($memory) {
+                $totalMemory = ($memory | Measure-Object -Property Capacity -Sum).Sum / 1GB
+                $systemInfo.TotalMemoryGB = [math]::Round($totalMemory, 2)
+                $systemInfo.MemorySlots = $memory.Count
+                $systemInfo.MemoryType = $memory[0].MemoryType
+                Write-LogEntry "Memory info collected" "INFO" -FunctionName "Get-SystemInfo" -AdditionalData @{
+                    TotalGB = $systemInfo.TotalMemoryGB
+                    Slots = $systemInfo.MemorySlots
+                    Type = $systemInfo.MemoryType
+                }
+            }
+        } catch {
+            Write-LogEntry "Failed to collect memory info: $($_.Exception.Message)" "WARNING" -FunctionName "Get-SystemInfo"
+        }
+        
+        # Get disk information
+        try {
+            $disks = Get-WmiObject -Class Win32_LogicalDisk -ErrorAction SilentlyContinue
+            if ($disks) {
+                $systemInfo.DiskInfo = @()
+                foreach ($disk in $disks) {
+                    $diskInfo = @{
+                        Drive = $disk.DeviceID
+                        Size = [math]::Round($disk.Size / 1GB, 2)
+                        FreeSpace = [math]::Round($disk.FreeSpace / 1GB, 2)
+                        FileSystem = $disk.FileSystem
+                    }
+                    $systemInfo.DiskInfo += $diskInfo
+                }
+                Write-LogEntry "Disk info collected" "INFO" -FunctionName "Get-SystemInfo" -AdditionalData @{
+                    DiskCount = $systemInfo.DiskInfo.Count
+                    Disks = $systemInfo.DiskInfo
+                }
+            }
+        } catch {
+            Write-LogEntry "Failed to collect disk info: $($_.Exception.Message)" "WARNING" -FunctionName "Get-SystemInfo"
+        }
+        
+        $duration = ((Get-Date) - $startTime).TotalMilliseconds
+        Write-ProcessLog -ProcessName "Get-SystemInfo" -Action "System Information Collection" -Status "Completed" -Results @{
+            OSName = $systemInfo.OSName
+            OSVersion = $systemInfo.OSVersion
+            OSBuild = $systemInfo.OSBuild
+            Architecture = $systemInfo.OSArchitecture
+            CPUName = $systemInfo.CPUName
+            CPUCores = $systemInfo.CPUCores
+            RAMSize = $systemInfo.RAMSize
+            GPUName = $systemInfo.GPUName
+            PowerShellVersion = $systemInfo.PowerShellVersion
+            Username = $systemInfo.Username
+            ComputerName = $systemInfo.ComputerName
+        } -Duration $duration
+        
+        Write-LogEntry "System info collected successfully" "SUCCESS" -FunctionName "Get-SystemInfo"
         return $systemInfo
     } catch {
-        Write-LogEntry "Error collecting system info: $($_.Exception.Message)" "ERROR"
+        $duration = ((Get-Date) - $startTime).TotalMilliseconds
+        Write-ProcessLog -ProcessName "Get-SystemInfo" -Action "System Information Collection" -Status "Failed" -ErrorMessage $_.Exception.Message -Duration $duration
+        Write-LogEntry "Error collecting system info: $($_.Exception.Message)" "ERROR" -FunctionName "Get-SystemInfo"
         return $null
     }
 }
@@ -911,7 +1062,8 @@ function Test-ARM64Compatibility {
 }
 
 function Get-RobloxInfo {
-	Write-LogEntry "Detecting Roblox installation" "INFO"
+	$startTime = Get-Date
+	Write-LogEntry "Detecting Roblox installation" "INFO" -FunctionName "Get-RobloxInfo"
 	Show-ProgressBar -Activity "Mendeteksi Roblox" -Status "Mencari instalasi Roblox..." -PercentComplete 30
 	
 	$robloxInfo = @{
@@ -924,6 +1076,8 @@ function Get-RobloxInfo {
 		InstallDate = ""
 		Size = 0
 		ExecHealth = $null
+		ProcessDetails = @()
+		RegistryInfo = @{}
 	}
 	
 	$possiblePaths = @(
@@ -932,11 +1086,19 @@ function Get-RobloxInfo {
 		"$env:PROGRAMFILES(X86)\Roblox",
 		"$env:APPDATA\Roblox"
 	)
+	
+	Write-LogEntry "Searching for Roblox installation in possible paths" "INFO" -FunctionName "Get-RobloxInfo" -AdditionalData @{
+		Paths = $possiblePaths
+	}
+	
 	foreach ($path in $possiblePaths) {
 		if (Test-Path $path) {
 			$robloxInfo.InstallPath = $path
 			$robloxInfo.IsInstalled = $true
-			Write-LogEntry "Found Roblox installation at: $path" "INFO"
+			Write-LogEntry "Found Roblox installation at: $path" "INFO" -FunctionName "Get-RobloxInfo" -AdditionalData @{
+				Path = $path
+				PathType = "Installation Directory"
+			}
 			break
 		}
 	}
@@ -947,37 +1109,137 @@ function Get-RobloxInfo {
 			"$($robloxInfo.InstallPath)\RobloxPlayerLauncher.exe",
 			"$($robloxInfo.InstallPath)\Versions\*\RobloxPlayerBeta.exe"
 		)
+		Write-LogEntry "Searching for Roblox executables" "INFO" -FunctionName "Get-RobloxInfo" -AdditionalData @{
+			SearchPaths = $exePaths
+		}
+		
 		foreach ($exePath in $exePaths) {
 			$foundExe = Get-ChildItem $exePath -ErrorAction SilentlyContinue | Select-Object -First 1
 			if ($foundExe) {
 				$robloxInfo.ExecutablePath = $foundExe.FullName
+				Write-LogEntry "Found Roblox executable" "INFO" -FunctionName "Get-RobloxInfo" -AdditionalData @{
+					ExecutablePath = $foundExe.FullName
+					FileName = $foundExe.Name
+					FileSize = $foundExe.Length
+					CreationTime = $foundExe.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")
+					LastWriteTime = $foundExe.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+				}
+				
 				try {
 					$versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($foundExe.FullName)
 					$robloxInfo.Version = $versionInfo.ProductVersion
-				} catch { $robloxInfo.Version = "Unknown" }
+					Write-LogEntry "Version info extracted" "INFO" -FunctionName "Get-RobloxInfo" -AdditionalData @{
+						ProductVersion = $versionInfo.ProductVersion
+						FileVersion = $versionInfo.FileVersion
+						ProductName = $versionInfo.ProductName
+						CompanyName = $versionInfo.CompanyName
+					}
+				} catch { 
+					$robloxInfo.Version = "Unknown"
+					Write-LogEntry "Failed to extract version info: $($_.Exception.Message)" "WARNING" -FunctionName "Get-RobloxInfo"
+				}
 				$robloxInfo.InstallDate = $foundExe.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")
 				break
 			}
 		}
+		
 		# Evaluasi kesehatan executable
-		if ($robloxInfo.ExecutablePath) { $robloxInfo.ExecHealth = Get-ExecutableHealth -ExecutablePath $robloxInfo.ExecutablePath }
+		if ($robloxInfo.ExecutablePath) { 
+			$robloxInfo.ExecHealth = Get-ExecutableHealth -ExecutablePath $robloxInfo.ExecutablePath
+			Write-LogEntry "Executable health check completed" "INFO" -FunctionName "Get-RobloxInfo" -AdditionalData @{
+				Health = $robloxInfo.ExecHealth.Health
+				SignatureStatus = $robloxInfo.ExecHealth.SignatureStatus
+				FileIntegrity = $robloxInfo.ExecHealth.FileIntegrity
+			}
+		}
 	}
 	
 	# Check running processes
+	Write-LogEntry "Checking for running Roblox processes" "INFO" -FunctionName "Get-RobloxInfo"
 	$robloxProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like "*Roblox*" }
 	$robloxInfo.ProcessCount = $robloxProcesses.Count
 	$robloxInfo.IsRunning = ($robloxInfo.IsRunning -or ($robloxProcesses.Count -gt 0))
 	
+	# Log process details
+	if ($robloxProcesses.Count -gt 0) {
+		foreach ($proc in $robloxProcesses) {
+			$processDetail = @{
+				ProcessName = $proc.ProcessName
+				ProcessId = $proc.Id
+				StartTime = $proc.StartTime.ToString("yyyy-MM-dd HH:mm:ss")
+				WorkingSet = [math]::Round($proc.WorkingSet / 1MB, 2)
+				CPU = $proc.CPU
+			}
+			$robloxInfo.ProcessDetails += $processDetail
+		}
+		
+		Write-LogEntry "Roblox processes found" "INFO" -FunctionName "Get-RobloxInfo" -AdditionalData @{
+			ProcessCount = $robloxProcesses.Count
+			Processes = $robloxInfo.ProcessDetails
+		}
+	} else {
+		Write-LogEntry "No Roblox processes currently running" "INFO" -FunctionName "Get-RobloxInfo"
+	}
+	
 	# Hitung ukuran instalasi (aman)
 	if ($robloxInfo.InstallPath -and (Test-Path $robloxInfo.InstallPath)) {
 		try {
+			Write-LogEntry "Calculating installation size" "INFO" -FunctionName "Get-RobloxInfo"
 			$items = Get-ChildItem -Path $robloxInfo.InstallPath -Recurse -File -ErrorAction SilentlyContinue -Force | Select-Object -First 50000
 			$totalSize = ($items | Measure-Object -Property Length -Sum).Sum
 			$robloxInfo.Size = [math]::Round(($totalSize) / 1MB, 2)
-		} catch { $robloxInfo.Size = 0 }
+			Write-LogEntry "Installation size calculated" "INFO" -FunctionName "Get-RobloxInfo" -AdditionalData @{
+				SizeMB = $robloxInfo.Size
+				FileCount = $items.Count
+				Path = $robloxInfo.InstallPath
+			}
+		} catch { 
+			$robloxInfo.Size = 0
+			Write-LogEntry "Failed to calculate installation size: $($_.Exception.Message)" "WARNING" -FunctionName "Get-RobloxInfo"
+		}
 	}
 	
-	Write-LogEntry "Roblox detection completed" "INFO"
+	# Get registry information
+	try {
+		Write-LogEntry "Collecting registry information" "INFO" -FunctionName "Get-RobloxInfo"
+		$regPaths = @(
+			"HKLM:\SOFTWARE\Roblox\RobloxPlayer",
+			"HKLM:\SOFTWARE\WOW6432Node\Roblox\RobloxPlayer",
+			"HKCU:\SOFTWARE\Roblox\RobloxPlayer"
+		)
+		
+		foreach ($regPath in $regPaths) {
+			if (Test-Path $regPath) {
+				$regValues = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+				if ($regValues) {
+					$robloxInfo.RegistryInfo[$regPath] = $regValues
+					Write-LogEntry "Registry path found" "INFO" -FunctionName "Get-RobloxInfo" -AdditionalData @{
+						RegistryPath = $regPath
+						ValueCount = ($regValues.PSObject.Properties | Where-Object { $_.Name -notlike "PS*" }).Count
+					}
+				}
+			}
+		}
+	} catch {
+		Write-LogEntry "Failed to collect registry info: $($_.Exception.Message)" "WARNING" -FunctionName "Get-RobloxInfo"
+	}
+	
+	$duration = ((Get-Date) - $startTime).TotalMilliseconds
+	Write-ProcessLog -ProcessName "Get-RobloxInfo" -Action "Roblox Installation Detection" -Status "Completed" -Results @{
+		IsInstalled = $robloxInfo.IsInstalled
+		InstallPath = $robloxInfo.InstallPath
+		ExecutablePath = $robloxInfo.ExecutablePath
+		Version = $robloxInfo.Version
+		IsRunning = $robloxInfo.IsRunning
+		ProcessCount = $robloxInfo.ProcessCount
+		InstallDate = $robloxInfo.InstallDate
+		Size = $robloxInfo.Size
+		ExecHealth = $robloxInfo.ExecHealth
+		ProcessDetails = $robloxInfo.ProcessDetails
+		RegistryInfo = $robloxInfo.RegistryInfo
+	} -Duration $duration
+	
+	Write-LogEntry "Roblox detection completed" "INFO" -FunctionName "Get-RobloxInfo"
 	return $robloxInfo
 }
 
@@ -1003,7 +1265,7 @@ function Get-MsvcRedistInfo {
 }
 
 function Test-SystemRequirements {
-    Write-LogEntry "Checking system requirements" "INFO"
+    Write-LogEntry "Checking system requirements" "INFO" -FunctionName "Test-SystemRequirements"
     Show-ProgressBar -Activity "Memeriksa Persyaratan Sistem" -Status "Validasi kompabilitas..." -PercentComplete 50
     
     $requirements = @{
@@ -1015,21 +1277,41 @@ function Test-SystemRequirements {
     }
     
     try {
+        Write-LogEntry "Starting system requirements validation" "INFO" -FunctionName "Test-SystemRequirements"
+        
         # Check OS - use compatibility-aware approach
         $requirements.OS.Current = $Global:WindowsCompatibility.CompatibilityLevel
         $supportedOS = @("Windows 7", "Windows 8", "Windows 10", "Windows 11", "Windows Server")
         $requirements.OS.Met = $supportedOS | Where-Object { $requirements.OS.Current -like "*$_*" }
         
+        Write-LogEntry "OS compatibility check completed" "INFO" -FunctionName "Test-SystemRequirements" -AdditionalData @{
+            CurrentOS = $requirements.OS.Current
+            Supported = $requirements.OS.Met
+            Required = $requirements.OS.Required
+        }
+        
         # Check RAM - use compatibility-aware approach
+        Write-LogEntry "Checking RAM requirements" "INFO" -FunctionName "Test-SystemRequirements"
         if ($Global:WindowsCompatibility.SupportsCIM) {
             $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
+            $method = "CIM"
         } else {
             $cs = Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue
+            $method = "WMI"
         }
+        
         $ramTotal = if ($cs) { $cs.TotalPhysicalMemory } else { 0 }
         $ramGB = [math]::Round($ramTotal / 1GB, 2)
         $requirements.RAM.Current = "$ramGB GB"
         $requirements.RAM.Met = $ramGB -ge 1
+        
+        Write-LogEntry "RAM check completed" "INFO" -FunctionName "Test-SystemRequirements" -AdditionalData @{
+            TotalRAM = $ramTotal
+            RAMGB = $ramGB
+            Required = "1 GB"
+            Met = $requirements.RAM.Met
+            Method = $method
+        }
         
         # Check DirectX via dxdiag (multi-locale)
 		try {
@@ -1913,6 +2195,8 @@ function Show-NetworkPacketReport {
 }
 
 function Invoke-NetworkAndStabilityFix {
+	Write-LogEntry "Starting Network and Stability Fix" "INFO" -FunctionName "Invoke-NetworkAndStabilityFix"
+	
 	# Clean header tanpa Clear-Host untuk menghindari artifact
 	Write-Host ""
 	Write-ColorText "🔧 MEMULAI: Perbaikan Jaringan Aman + WARP + Cek Konflik" -Color $Colors.Header
@@ -1927,6 +2211,11 @@ function Invoke-NetworkAndStabilityFix {
 		if ($resp -match '^[AaSs]$') { $mode = if ($resp -match '^[Aa]$') { 'All' } else { 'Step' } }
 		else { Write-ColorText "❌ Jawab dengan A atau S: " -Color $Colors.Error -NoNewLine }
 	} while (-not $mode)
+
+	Write-LogEntry "User selected mode: $mode" "INFO" -FunctionName "Invoke-NetworkAndStabilityFix" -AdditionalData @{
+		SelectedMode = $mode
+		UserInput = $resp
+	}
 
 	$packet = $null
 	$warp = $null
@@ -2663,27 +2952,153 @@ function Reset-ContentArea {
 }
 
 function Invoke-FullDiagnosis {
+    $startTime = Get-Date
     Clear-Host
     Write-ColorText "🔍 MEMULAI DIAGNOSIS LENGKAP..." -Color $Colors.Header
     
-    Show-LoadingBar -Text "Mengumpulkan informasi sistem" -Duration 2
-    $systemInfo = Get-SystemInfo
-    Show-LoadingBar -Text "Mendeteksi instalasi Roblox" -Duration 1
-    $robloxInfo = Get-RobloxInfo
-    Show-LoadingBar -Text "Memeriksa persyaratan sistem" -Duration 1
-    $requirements = Test-SystemRequirements
-    Show-LoadingBar -Text "Mengumpulkan log Roblox" -Duration 1
-    $logInfo = Get-RobloxLogs
-    Show-LoadingBar -Text "Mendiagnosis masalah" -Duration 2
-    $integrityIssues = Test-RobloxIntegrity
-    $commonIssues = Test-CommonIssues
-    $connectivity = Test-RobloxConnectivity
+    Write-LogEntry "Starting comprehensive diagnosis" "INFO" -FunctionName "Invoke-FullDiagnosis" -AdditionalData @{
+        DiagnosisType = "Full"
+        StartTime = $startTime.ToString("yyyy-MM-dd HH:mm:ss")
+    }
     
-    Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo -Connectivity $connectivity
-    Start-ReportDelay
-    $hasIssues = Show-DiagnosisReport -IntegrityIssues $integrityIssues -CommonIssues $commonIssues -LogInfo $logInfo
-    
-    return @{ HasIssues = $hasIssues; IntegrityIssues = $integrityIssues; CommonIssues = $commonIssues; SystemInfo = $systemInfo; RobloxInfo = $robloxInfo }
+    try {
+        # Step 1: System Information Collection
+        Write-LogEntry "Step 1: Collecting system information" "INFO" -FunctionName "Invoke-FullDiagnosis"
+        Show-LoadingBar -Text "Mengumpulkan informasi sistem" -Duration 2
+        $systemInfo = Get-SystemInfo
+        if ($systemInfo) {
+            Write-LogEntry "System information collected successfully" "SUCCESS" -FunctionName "Invoke-FullDiagnosis" -AdditionalData @{
+                OSName = $systemInfo.OSName
+                OSVersion = $systemInfo.OSVersion
+                Architecture = $systemInfo.OSArchitecture
+                CPUName = $systemInfo.CPUName
+                RAMSize = $systemInfo.RAMSize
+            }
+        } else {
+            Write-LogEntry "Failed to collect system information" "ERROR" -FunctionName "Invoke-FullDiagnosis"
+        }
+        
+        # Step 2: Roblox Installation Detection
+        Write-LogEntry "Step 2: Detecting Roblox installation" "INFO" -FunctionName "Invoke-FullDiagnosis"
+        Show-LoadingBar -Text "Mendeteksi instalasi Roblox" -Duration 1
+        $robloxInfo = Get-RobloxInfo
+        if ($robloxInfo) {
+            Write-LogEntry "Roblox information collected successfully" "SUCCESS" -FunctionName "Invoke-FullDiagnosis" -AdditionalData @{
+                IsInstalled = $robloxInfo.IsInstalled
+                InstallPath = $robloxInfo.InstallPath
+                Version = $robloxInfo.Version
+                IsRunning = $robloxInfo.IsRunning
+                ProcessCount = $robloxInfo.ProcessCount
+            }
+        } else {
+            Write-LogEntry "Failed to collect Roblox information" "ERROR" -FunctionName "Invoke-FullDiagnosis"
+        }
+        
+        # Step 3: System Requirements Check
+        Write-LogEntry "Step 3: Checking system requirements" "INFO" -FunctionName "Invoke-FullDiagnosis"
+        Show-LoadingBar -Text "Memeriksa persyaratan sistem" -Duration 1
+        $requirements = Test-SystemRequirements
+        if ($requirements) {
+            $metCount = ($requirements.Values | Where-Object { $_.Met }).Count
+            $totalCount = $requirements.Count
+            Write-LogEntry "System requirements check completed" "SUCCESS" -FunctionName "Invoke-FullDiagnosis" -AdditionalData @{
+                RequirementsMet = $metCount
+                TotalRequirements = $totalCount
+                SuccessRate = [math]::Round(($metCount / $totalCount) * 100, 2)
+            }
+        } else {
+            Write-LogEntry "Failed to check system requirements" "ERROR" -FunctionName "Invoke-FullDiagnosis"
+        }
+        
+        # Step 4: Roblox Logs Collection
+        Write-LogEntry "Step 4: Collecting Roblox logs" "INFO" -FunctionName "Invoke-FullDiagnosis"
+        Show-LoadingBar -Text "Mengumpulkan log Roblox" -Duration 1
+        $logInfo = Get-RobloxLogs
+        if ($logInfo) {
+            Write-LogEntry "Roblox logs collected successfully" "SUCCESS" -FunctionName "Invoke-FullDiagnosis" -AdditionalData @{
+                LogsFound = $logInfo.Found
+                LogCount = $logInfo.LogPaths.Count
+                ErrorCount = $logInfo.ErrorSummary.Count
+            }
+        } else {
+            Write-LogEntry "Failed to collect Roblox logs" "ERROR" -FunctionName "Invoke-FullDiagnosis"
+        }
+        
+        # Step 5: Problem Diagnosis
+        Write-LogEntry "Step 5: Diagnosing problems" "INFO" -FunctionName "Invoke-FullDiagnosis"
+        Show-LoadingBar -Text "Mendiagnosis masalah" -Duration 2
+        
+        # Integrity Issues Check
+        Write-LogEntry "Checking Roblox integrity" "INFO" -FunctionName "Invoke-FullDiagnosis"
+        $integrityIssues = Test-RobloxIntegrity
+        if ($integrityIssues) {
+            Write-LogEntry "Integrity check completed" "INFO" -FunctionName "Invoke-FullDiagnosis" -AdditionalData @{
+                IssueCount = $integrityIssues.Count
+                Issues = $integrityIssues
+            }
+        }
+        
+        # Common Issues Check
+        Write-LogEntry "Checking common issues" "INFO" -FunctionName "Invoke-FullDiagnosis"
+        $commonIssues = Test-CommonIssues
+        if ($commonIssues) {
+            Write-LogEntry "Common issues check completed" "INFO" -FunctionName "Invoke-FullDiagnosis" -AdditionalData @{
+                IssueCount = $commonIssues.Count
+                Issues = $commonIssues
+            }
+        }
+        
+        # Connectivity Check
+        Write-LogEntry "Checking Roblox connectivity" "INFO" -FunctionName "Invoke-FullDiagnosis"
+        $connectivity = Test-RobloxConnectivity
+        if ($connectivity) {
+            Write-LogEntry "Connectivity check completed" "INFO" -FunctionName "Invoke-FullDiagnosis" -AdditionalData @{
+                PingOk = $connectivity.PingOk
+                HttpOkMain = $connectivity.HttpOkMain
+                HttpOkApi = $connectivity.HttpOkApi
+            }
+        }
+        
+        # Step 6: Display Reports
+        Write-LogEntry "Step 6: Displaying system report" "INFO" -FunctionName "Invoke-FullDiagnosis"
+        Show-SystemReport -SystemInfo $systemInfo -RobloxInfo $robloxInfo -Requirements $requirements -LogInfo $logInfo -Connectivity $connectivity
+        Start-ReportDelay
+        
+        Write-LogEntry "Step 7: Displaying diagnosis report" "INFO" -FunctionName "Invoke-FullDiagnosis"
+        $hasIssues = Show-DiagnosisReport -IntegrityIssues $integrityIssues -CommonIssues $commonIssues -LogInfo $logInfo
+        
+        # Final Summary
+        $integrityCount = if ($integrityIssues) { $integrityIssues.Count } else { 0 }
+        $commonCount = if ($commonIssues) { $commonIssues.Count } else { 0 }
+        $totalIssues = $integrityCount + $commonCount
+        $duration = ((Get-Date) - $startTime).TotalMilliseconds
+        
+        Write-ProcessLog -ProcessName "Invoke-FullDiagnosis" -Action "Comprehensive Diagnosis" -Status "Completed" -Results @{
+            SystemInfoCollected = $null -ne $systemInfo
+            RobloxInfoCollected = $null -ne $robloxInfo
+            RequirementsChecked = $null -ne $requirements
+            LogsCollected = $null -ne $logInfo
+            IntegrityIssuesFound = $integrityCount
+            CommonIssuesFound = $commonCount
+            ConnectivityChecked = $null -ne $connectivity
+            TotalIssues = $totalIssues
+            HasIssues = $hasIssues
+        } -Duration $duration
+        
+        Write-LogEntry "Full diagnosis completed successfully" "SUCCESS" -FunctionName "Invoke-FullDiagnosis" -AdditionalData @{
+            TotalIssues = $totalIssues
+            HasIssues = $hasIssues
+            Duration = $duration
+        }
+        
+        return @{ HasIssues = $hasIssues; IntegrityIssues = $integrityIssues; CommonIssues = $commonIssues; SystemInfo = $systemInfo; RobloxInfo = $robloxInfo }
+        
+    } catch {
+        $duration = ((Get-Date) - $startTime).TotalMilliseconds
+        Write-ProcessLog -ProcessName "Invoke-FullDiagnosis" -Action "Comprehensive Diagnosis" -Status "Failed" -ErrorMessage $_.Exception.Message -Duration $duration
+        Write-LogEntry "Diagnosis failed: $($_.Exception.Message)" "ERROR" -FunctionName "Invoke-FullDiagnosis"
+        throw
+    }
 }
 
 # Tampilkan rencana perbaikan berdasarkan diagnosis
@@ -2811,33 +3226,49 @@ function Register-CleanupHandlers {
 # ==================== MAIN SCRIPT EXECUTION ====================
 
 function Main {
+	$startTime = Get-Date
+	Write-LogEntry "=== ROBLOX CHECKER SESSION STARTED ===" "INFO" -FunctionName "Main" -AdditionalData @{
+		StartTime = $startTime.ToString("yyyy-MM-dd HH:mm:ss")
+		ScriptVersion = $Global:ScriptVersion
+		PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+		ExecutionPolicy = Get-ExecutionPolicy
+		IsElevated = $false
+	}
+	
 	try {
 		# Check admin privileges first - if not admin, exit immediately
+		Write-LogEntry "Checking admin privileges" "INFO" -FunctionName "Main"
 		if (-not (Test-AdminPrivileges)) {
+			Write-LogEntry "Admin privileges not detected, requesting elevation" "WARNING" -FunctionName "Main"
 			Request-AdminElevation
 			# If we reach here, script will exit; safeguard anyway
 			exit 1
 		}
 
-		# Admin shell confirmed; if executed via irm|iex, download and run the script from temp
-		Invoke-RemoteExecution
-
+		Write-LogEntry "Admin privileges confirmed" "SUCCESS" -FunctionName "Main"
 		Write-ColorText "✅ Berjalan dengan hak akses Administrator" -Color $Colors.Success
 		
+		# Admin shell confirmed; if executed via irm|iex, download and run the script from temp
+		Write-LogEntry "Invoking remote execution check" "INFO" -FunctionName "Main"
+		Invoke-RemoteExecution
+
 		# Initialize environment
+		Write-LogEntry "Initializing environment" "INFO" -FunctionName "Main"
 		Initialize-Environment
 		
 		# Brief pause after initialization/system info before showing main menu
 		Start-Sleep -Seconds 2
 		
+		Write-LogEntry "Registering cleanup handlers" "INFO" -FunctionName "Main"
 		Register-CleanupHandlers
 		$originalPolicy = Set-ExecutionPolicyTemporary
-		try {
-			Write-LogEntry "Main menu started" "INFO"
-		} catch {
-			Write-Host "⚠️ Logging error: $($_.Exception.Message)" -ForegroundColor Red
+		
+		Write-LogEntry "Main menu started" "INFO" -FunctionName "Main" -AdditionalData @{
+			ExecutionPolicy = Get-ExecutionPolicy
+			OriginalPolicy = $originalPolicy
 		}
 		
+		$menuChoices = @()
 		do {
 			$menuOptions = @(
 				"🔍 Diagnosis Lengkap (Recommended)",
@@ -2847,20 +3278,66 @@ function Main {
 				"❌ Keluar"
 			)
 			$choice = Show-ArrowMenu -Options $menuOptions
+			$menuChoices += $choice
+			
+			Write-LogEntry "User selected menu option: $choice" "INFO" -FunctionName "Main" -AdditionalData @{
+				MenuChoice = $choice
+				MenuDescription = $menuOptions[$choice - 1]
+				ChoiceHistory = $menuChoices
+			}
 			
 			switch ($choice) {
-				1 { try { $diagnosisResults = Invoke-FullDiagnosis } catch { Write-ColorText "❌ Diagnosis gagal: $($_.Exception.Message)" -Color $Colors.Error } }
+				1 { 
+					try { 
+						Write-LogEntry "Starting full diagnosis" "INFO" -FunctionName "Main"
+						$diagnosisResults = Invoke-FullDiagnosis 
+						$integrityCount = if ($diagnosisResults.IntegrityIssues) { $diagnosisResults.IntegrityIssues.Count } else { 0 }
+						$commonCount = if ($diagnosisResults.CommonIssues) { $diagnosisResults.CommonIssues.Count } else { 0 }
+						$totalIssueCount = $integrityCount + $commonCount
+						Write-LogEntry "Full diagnosis completed" "SUCCESS" -FunctionName "Main" -AdditionalData @{
+							HasIssues = $diagnosisResults.HasIssues
+							IssueCount = $totalIssueCount
+							IntegrityIssuesCount = $integrityCount
+							CommonIssuesCount = $commonCount
+						}
+					} catch { 
+						Write-LogEntry "Diagnosis failed: $($_.Exception.Message)" "ERROR" -FunctionName "Main"
+						Write-ColorText "❌ Diagnosis gagal: $($_.Exception.Message)" -Color $Colors.Error 
+					} 
+				}
 				2 {
 					try {
+						Write-LogEntry "Starting auto repair process" "INFO" -FunctionName "Main"
 						Clear-Host
 						Write-ColorText "🔍 Menjalankan diagnosis cepat..." -Color $Colors.Info
 						$diagnosisResults = Invoke-FullDiagnosis
 						Invoke-AutoRepair -DiagnosisResults $diagnosisResults
-					} catch { Write-ColorText "❌ Perbaikan gagal: $($_.Exception.Message)" -Color $Colors.Error }
+						Write-LogEntry "Auto repair completed" "SUCCESS" -FunctionName "Main"
+					} catch { 
+						Write-LogEntry "Auto repair failed: $($_.Exception.Message)" "ERROR" -FunctionName "Main"
+						Write-ColorText "❌ Perbaikan gagal: $($_.Exception.Message)" -Color $Colors.Error 
+					}
 				}
-				3 { Clear-Host; Invoke-CacheCleanOnly }
-				4 { try { Write-LogEntry "Launching NetworkAndStabilityFix" "INFO"; Invoke-NetworkAndStabilityFix } catch { Write-ColorText "❌ Gagal menjalankan paket jaringan: $($_.Exception.Message)" -Color $Colors.Error; Write-LogEntry ("NetworkAndStabilityFix failed: " + $_.Exception.Message) "ERROR" } }
-				5 { break }
+				3 { 
+					Write-LogEntry "Starting cache clean only" "INFO" -FunctionName "Main"
+					Clear-Host; 
+					Invoke-CacheCleanOnly 
+					Write-LogEntry "Cache clean completed" "SUCCESS" -FunctionName "Main"
+				}
+				4 { 
+					try { 
+						Write-LogEntry "Launching NetworkAndStabilityFix" "INFO" -FunctionName "Main"
+						Invoke-NetworkAndStabilityFix 
+						Write-LogEntry "NetworkAndStabilityFix completed" "SUCCESS" -FunctionName "Main"
+					} catch { 
+						Write-LogEntry "NetworkAndStabilityFix failed: $($_.Exception.Message)" "ERROR" -FunctionName "Main"
+						Write-ColorText "❌ Gagal menjalankan paket jaringan: $($_.Exception.Message)" -Color $Colors.Error
+					} 
+				}
+				5 { 
+					Write-LogEntry "User selected exit option" "INFO" -FunctionName "Main"
+					break 
+				}
 			}
 			
 			if ($choice -ne 5) {
@@ -2870,13 +3347,30 @@ function Main {
 			}
 			
 		} while ($choice -ne 5)
-		Write-LogEntry "Main menu exited" "INFO"
+		
+		$sessionDuration = ((Get-Date) - $startTime).TotalSeconds
+		Write-LogEntry "Main menu exited" "INFO" -FunctionName "Main" -AdditionalData @{
+			SessionDuration = $sessionDuration
+			TotalMenuChoices = $menuChoices.Count
+			MenuChoices = $menuChoices
+		}
 		
 	} catch {
-		Write-LogEntry "Unexpected error in main execution: $($_.Exception.Message)" "ERROR"
+		$sessionDuration = ((Get-Date) - $startTime).TotalSeconds
+		Write-LogEntry "Unexpected error in main execution: $($_.Exception.Message)" "ERROR" -FunctionName "Main" -AdditionalData @{
+			SessionDuration = $sessionDuration
+			ErrorDetails = $_.Exception.ToString()
+			StackTrace = $_.ScriptStackTrace
+		}
 		Write-ColorText "❌ Terjadi kesalahan tak terduga: $($_.Exception.Message)" -Color $Colors.Error
-		Write-ColorText "📄 Periksa log file untuk detail: $Global:LogFile" -Color $Colors.Info
+		Write-ColorText "📄 Periksa log file untuk detail: $Global:LogFile" -Color $Colors.Error
 	} finally {
+		$sessionDuration = ((Get-Date) - $startTime).TotalSeconds
+		Write-LogEntry "Main function cleanup started" "INFO" -FunctionName "Main" -AdditionalData @{
+			SessionDuration = $sessionDuration
+			SkipOuterFinal = $Global:SkipOuterFinal
+		}
+		
 		if (-not $Global:SkipOuterFinal) {
 			# Animasi cleaning up sebelum keluar
 			try {
@@ -2885,7 +3379,10 @@ function Main {
 			} catch {}
 			Invoke-SafetyCleanup
 			if ($originalPolicy) { Restore-ExecutionPolicy -OriginalPolicy $originalPolicy }
-			Write-LogEntry "=== ROBLOX CHECKER SESSION ENDED ===" "INFO"
+			Write-LogEntry "=== ROBLOX CHECKER SESSION ENDED ===" "INFO" -FunctionName "Main" -AdditionalData @{
+				SessionDuration = $sessionDuration
+				CleanupCompleted = $true
+			}
 			Show-Goodbye
 			
 			# Auto-close terminal dengan countdown
@@ -2893,7 +3390,15 @@ function Main {
 		} else {
 			# Minimal silent cleanup without double prints
 			try { Invoke-SafetyCleanup } catch {}
-			try { if ($originalPolicy) { Restore-ExecutionPolicy -OriginalPolicy $originalPolicy } } catch {}
+			try { 
+				if ($originalPolicy) { 
+					Restore-ExecutionPolicy -OriginalPolicy $originalPolicy 
+				} 
+			} catch {}
+			Write-LogEntry "=== ROBLOX CHECKER SESSION ENDED (Silent Mode) ===" "INFO" -FunctionName "Main" -AdditionalData @{
+				SessionDuration = $sessionDuration
+				SilentCleanup = $true
+			}
 		}
 	}
 }
