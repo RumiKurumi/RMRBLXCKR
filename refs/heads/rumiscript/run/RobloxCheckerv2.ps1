@@ -202,15 +202,15 @@ function Test-AdminPrivileges {
 
 function Request-AdminElevation {
     try {
-        Write-ColorText "🔐 Program memerlukan hak akses Administrator" -Color $Colors.Warning
-        Write-ColorText "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -Color $Colors.Info
-        Write-ColorText "💡 Jalankan PowerShell sebagai Administrator dan jalankan script ini lagi" -Color $Colors.Info
-        Write-ColorText "🔗 Atau download manual dari: https://github.com/RumiKurumi/RMRBLXCKR" -Color $Colors.Info
-        Write-ColorText "⏳ Program akan menutup dalam 2 detik..." -Color $Colors.Warning
+        Write-Host "🔐 Program memerlukan hak akses Administrator" -ForegroundColor Yellow
+        Write-Host "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -ForegroundColor Cyan
+        Write-Host "💡 Jalankan PowerShell sebagai Administrator dan jalankan script ini lagi" -ForegroundColor Cyan
+        Write-Host "🔗 Atau download manual dari: https://github.com/RumiKurumi/RMRBLXCKR" -ForegroundColor Cyan
+        Write-Host "⏳ Program akan menutup dalam 2 detik..." -ForegroundColor Yellow
         Start-Sleep -Seconds 2
         exit 1
     } catch {
-        Write-ColorText "❌ Error: $($_.Exception.Message)" -Color $Colors.Error
+        Write-Host ("❌ Error: {0}" -f ($_.Exception.Message)) -ForegroundColor Red
         exit 1
     }
 }
@@ -274,7 +274,7 @@ function Request-AdminElevation {
 
 # ==================== REMOTE EXECUTION HANDLER ====================
 
-function Handle-RemoteExecution {
+function Invoke-RemoteExecution {
     try {
         # Check if running from irm | iex (no local file)
         $scriptPath = $MyInvocation.MyCommand.Path
@@ -285,7 +285,7 @@ function Handle-RemoteExecution {
             $tempScript = "$env:TEMP\RobloxChecker_Remote.ps1"
             $scriptUrl = "https://raw.githubusercontent.com/RumiKurumi/RMRBLXCKR/refs/heads/main/refs/heads/rumiscript/run/RobloxCheckerv2.ps1"
             
-            Write-ColorText "📥 Downloading Roblox Checker Script..." -Color $Colors.Info
+            Write-Host "📥 Downloading Roblox Checker Script..." -ForegroundColor Cyan
             $downloadSuccess = Show-DownloadProgress -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
             
             if (-not $downloadSuccess) {
@@ -293,7 +293,7 @@ function Handle-RemoteExecution {
             }
             
             # Verify download completion
-            Write-ColorText "🔍 Memverifikasi download..." -Color $Colors.Info
+            Write-Host "🔍 Memverifikasi download..." -ForegroundColor Cyan
             Start-Sleep -Seconds 1
             
             if (-not (Test-Path $tempScript)) {
@@ -305,11 +305,10 @@ function Handle-RemoteExecution {
                 throw "Downloaded script too small ($finalSize bytes), may be corrupted"
             }
             
-            Write-ColorText "✅ Download verification berhasil ($([math]::Round($finalSize / 1KB, 1)) KB)" -Color $Colors.Success
-            Write-LogEntry "Downloaded script to: $tempScript (Size: $finalSize bytes)" "INFO"
+            Write-Host ("✅ Download verification berhasil ({0} KB)" -f ([math]::Round($finalSize / 1KB, 1))) -ForegroundColor Green
             
             # Verify script content
-            Write-ColorText "🔍 Memverifikasi script yang didownload..." -Color $Colors.Info
+            Write-Host "🔍 Memverifikasi script yang didownload..." -ForegroundColor Cyan
             try {
                 $scriptContent = Get-Content $tempScript -Raw -ErrorAction Stop
                 if (-not $scriptContent -or $scriptContent.Length -lt 1000) {
@@ -318,10 +317,9 @@ function Handle-RemoteExecution {
                 
                 # Basic syntax check
                 $null = [System.Management.Automation.PSParser]::Tokenize($scriptContent, [ref]$null)
-                Write-ColorText "✅ Script syntax verification berhasil" -Color $Colors.Success
-                Write-LogEntry "Script syntax validation passed" "INFO"
+                Write-Host "✅ Script syntax verification berhasil" -ForegroundColor Green
             } catch {
-                Write-LogEntry "Script syntax validation failed: $($_.Exception.Message)" "ERROR"
+                Write-Host ("❌ Script syntax validation failed: {0}" -f ($_.Exception.Message)) -ForegroundColor Red
                 throw "Downloaded script has syntax errors: $($_.Exception.Message)"
             }
             
@@ -329,24 +327,20 @@ function Handle-RemoteExecution {
             $Global:TempScriptToCleanup = $tempScript
             
             # Execute downloaded script
-            Write-ColorText "🚀 Menjalankan script yang didownload..." -Color $Colors.Info
+            Write-Host "🚀 Menjalankan script yang didownload..." -ForegroundColor Cyan
             & $tempScript
             
             # Cleanup temp file after execution
             try {
                 if (Test-Path $tempScript) {
                     Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
-                    Write-LogEntry "Cleaned up temporary script: $tempScript" "INFO"
                 }
-            } catch {
-                Write-LogEntry "Failed to cleanup temporary script: $($_.Exception.Message)" "WARNING"
-            }
+            } catch {}
             
             exit 0
         }
     } catch {
-        Write-ColorText "❌ Error dalam remote execution: $($_.Exception.Message)" -Color $Colors.Error
-        Write-LogEntry "Remote execution failed: $($_.Exception.Message)" "ERROR"
+        Write-Host ("❌ Error dalam remote execution: {0}" -f ($_.Exception.Message)) -ForegroundColor Red
         
         # Cleanup on error
         try {
@@ -2840,7 +2834,7 @@ function Register-CleanupHandlers {
 function Main {
 	try {
 		# Handle remote execution first (irm | iex)
-		Handle-RemoteExecution
+		Invoke-RemoteExecution
 		
 		# Check admin privileges - if not admin, exit immediately
 		if (-not (Test-AdminPrivileges)) {
