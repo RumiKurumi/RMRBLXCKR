@@ -182,10 +182,29 @@ function Request-AdminElevation {
                 Invoke-WebRequest -Uri $scriptUrl -OutFile $tempScript -UseBasicParsing
                 Write-LogEntry "Downloaded script to: $tempScript" "INFO"
                 
-                # Start elevated process with downloaded script
-                Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScript`"" -Verb RunAs -Wait
+                # Start elevated process with downloaded script and elevation flag
+                Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScript`" -Elevated" -Verb RunAs -Wait
+                
+                # Cleanup temporary script after elevation
+                try {
+                    if (Test-Path $tempScript) {
+                        Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
+                        Write-LogEntry "Cleaned up temporary script: $tempScript" "INFO"
+                    }
+                } catch {
+                    Write-LogEntry "Failed to cleanup temporary script: $($_.Exception.Message)" "WARNING"
+                }
+                
                 exit 0
             } catch {
+                # Cleanup on error too
+                try {
+                    if (Test-Path $tempScript) {
+                        Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
+                        Write-LogEntry "Cleaned up temporary script after error: $tempScript" "INFO"
+                    }
+                } catch {}
+                
                 Write-ColorText "❌ Gagal download script untuk elevation: $($_.Exception.Message)" -Color $Colors.Error
                 Write-LogEntry "Failed to download script for elevation: $($_.Exception.Message)" "ERROR"
                 throw
@@ -193,7 +212,7 @@ function Request-AdminElevation {
         } else {
             # Running from local file
             Write-LogEntry "Requesting admin elevation for local script: $scriptPath" "INFO"
-            Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -Wait
+            Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`" -Elevated" -Verb RunAs -Wait
             exit 0
         }
     } catch {
@@ -1999,6 +2018,17 @@ function Invoke-SafetyCleanup {
             }
         }
         
+        # Clean elevation temporary script
+        $elevationTempScript = "$env:TEMP\RobloxChecker_Elevated.ps1"
+        if (Test-Path $elevationTempScript) {
+            try {
+                Remove-Item $elevationTempScript -Force -ErrorAction SilentlyContinue
+                Write-LogEntry "Cleaned elevation temp script: $elevationTempScript" "INFO"
+            } catch {
+                Write-LogEntry "Could not clean elevation temp script: $($_.Exception.Message)" "WARNING"
+            }
+        }
+        
         # Clean processes
         foreach ($processId in $Global:ProcessesToCleanup) {
             try {
@@ -2326,6 +2356,12 @@ function Main {
 			Write-ColorText "✅ Berjalan dengan hak akses Administrator" -Color $Colors.Success
 		}
 		
+		# If this is an elevated process, show success message
+		if ($Global:IsElevatedProcess) {
+			Write-ColorText "🚀 Elevation berhasil! Program berjalan dengan hak akses Administrator" -Color $Colors.Success
+			Write-LogEntry "Elevated process started successfully" "INFO"
+		}
+		
 		Initialize-Environment
 		Register-CleanupHandlers
 		$originalPolicy = Set-ExecutionPolicyTemporary
@@ -2393,6 +2429,9 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
     Write-Host "💡 Versi Anda: $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
     exit 1
 }
+
+# Check if this is an elevated process
+$Global:IsElevatedProcess = $args -contains "-Elevated"
 
 # Run main function
 if ($MyInvocation.InvocationName -ne '.') {
