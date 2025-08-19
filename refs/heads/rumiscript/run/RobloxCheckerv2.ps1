@@ -178,17 +178,11 @@ function Request-AdminElevation {
             try {
                 # Download with visual progress
                 
-                # Try progress bar first, fallback to spinner if it fails
-                $downloadSuccess = $false
-                try {
-                    $downloadSuccess = Show-DownloadProgress -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
-                } catch {
-                    Write-LogEntry "Progress bar download failed, trying spinner: $($_.Exception.Message)" "WARNING"
-                    $downloadSuccess = Show-DownloadSpinner -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
-                }
+                # Download with visual progress
+                $downloadSuccess = Show-DownloadProgress -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
                 
                 if (-not $downloadSuccess) {
-                    throw "Download failed with both progress bar and spinner methods"
+                    throw "Download failed"
                 }
                 
                 Write-LogEntry "Downloaded script to: $tempScript" "INFO"
@@ -2188,67 +2182,92 @@ function Show-DownloadProgress {
         Write-ColorText "📥 $Description..." -Color $Colors.Info
         Write-ColorText "🔗 URL: $Url" -Color $Colors.Accent
         
-        # Create WebClient for progress tracking
+        # Get file size first (if possible)
+        $totalBytes = 0
+        try {
+            $request = [System.Net.WebRequest]::Create($Url)
+            $response = $request.GetResponse()
+            $totalBytes = $response.ContentLength
+            $response.Close()
+        } catch {
+            Write-LogEntry "Could not get file size: $($_.Exception.Message)" "WARNING"
+        }
+        
+        # Create WebClient
         $webClient = New-Object System.Net.WebClient
         
-        # Register progress event
-        $webClient.DownloadProgressChanged = {
-            param($sender, $e)
-            $percent = $e.ProgressPercentage
-            $bytesReceived = $e.BytesReceived
-            $totalBytes = $e.TotalBytesToReceive
+        # Download with progress simulation
+        $startTime = Get-Date
+        $lastUpdate = $startTime
+        
+        # Start download in background
+        $job = Start-Job -ScriptBlock {
+            param($url, $outFile)
+            try {
+                $wc = New-Object System.Net.WebClient
+                $wc.DownloadFile($url, $outFile)
+                return "SUCCESS"
+            } catch {
+                return "ERROR: $($_.Exception.Message)"
+            } finally {
+                if ($wc) { $wc.Dispose() }
+            }
+        } -ArgumentList $Url, $OutFile
+        
+        # Show progress while downloading
+        $spinners = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+        $counter = 0
+        
+        while ($job.State -eq "Running") {
+            $spinner = $spinners[$counter % $spinners.Length]
+            $elapsed = (Get-Date) - $startTime
+            $elapsedStr = "{0:mm\:ss}" -f $elapsed
             
-            # Convert to KB/MB
-            $receivedKB = [math]::Round($bytesReceived / 1KB, 1)
+            # Check if file exists and get current size
+            $currentSize = 0
+            if (Test-Path $OutFile) {
+                $currentSize = (Get-Item $OutFile).Length
+            }
+            
+            $currentKB = [math]::Round($currentSize / 1KB, 1)
             $totalKB = [math]::Round($totalBytes / 1KB, 1)
             
-            # Progress bar (20 characters)
-            $progressBarLength = 20
-            $filledLength = [math]::Floor($percent / 100 * $progressBarLength)
-            $progressBar = "█" * $filledLength + "░" * ($progressBarLength - $filledLength)
-            
-            # Update progress display
-            Write-ColorText "`r📊 [$progressBar] $percent% ($receivedKB KB / $totalKB KB)" -Color $Colors.Accent -NoNewLine
-        }
-        
-        # Register completion event
-        $webClient.DownloadFileCompleted = {
-            param($sender, $e)
-            if ($e.Cancelled) {
-                Write-ColorText "`n❌ Download dibatalkan" -Color $Colors.Error
-            } elseif ($e.Error) {
-                Write-ColorText "`n❌ Download gagal: $($e.Error.Message)" -Color $Colors.Error
+            if ($totalBytes -gt 0) {
+                $percent = [math]::Round(($currentSize / $totalBytes) * 100)
+                $progressBarLength = 20
+                $filledLength = [math]::Floor($percent / 100 * $progressBarLength)
+                $progressBar = "█" * $filledLength + "░" * ($progressBarLength - $filledLength)
+                Write-ColorText "`r$spinner 📊 [$progressBar] $percent% ($currentKB KB / $totalKB KB) - $elapsedStr" -Color $Colors.Accent -NoNewLine
             } else {
-                Write-ColorText "`n✅ Download selesai!" -Color $Colors.Success
+                Write-ColorText "`r$spinner Downloading... ($currentKB KB) - $elapsedStr" -Color $Colors.Accent -NoNewLine
             }
+            
+            Start-Sleep -Milliseconds 200
+            $counter++
         }
         
-        # Start download
-        $webClient.DownloadFileAsync($Url, $OutFile)
+        # Get result
+        $result = Receive-Job $job
+        Remove-Job $job
         
-        # Wait for completion
-        while ($webClient.IsBusy) {
-            Start-Sleep -Milliseconds 100
-        }
-        
-        # Check if download was successful
-        if (Test-Path $OutFile) {
-            $fileSize = (Get-Item $OutFile).Length
-            $fileSizeKB = [math]::Round($fileSize / 1KB, 1)
-            Write-ColorText "📁 File tersimpan: $OutFile ($fileSizeKB KB)" -Color $Colors.Success
-            return $true
+        if ($result -eq "SUCCESS") {
+            if (Test-Path $OutFile) {
+                $fileSize = (Get-Item $OutFile).Length
+                $fileSizeKB = [math]::Round($fileSize / 1KB, 1)
+                Write-ColorText "`n✅ Download selesai! ($fileSizeKB KB)" -Color $Colors.Success
+                return $true
+            } else {
+                Write-ColorText "`n❌ File tidak ditemukan setelah download" -Color $Colors.Error
+                return $false
+            }
         } else {
-            Write-ColorText "❌ File tidak ditemukan setelah download" -Color $Colors.Error
+            Write-ColorText "`n❌ Download gagal: $result" -Color $Colors.Error
             return $false
         }
         
     } catch {
         Write-ColorText "❌ Error dalam download: $($_.Exception.Message)" -Color $Colors.Error
         return $false
-    } finally {
-        if ($webClient) {
-            $webClient.Dispose()
-        }
     }
 }
 
