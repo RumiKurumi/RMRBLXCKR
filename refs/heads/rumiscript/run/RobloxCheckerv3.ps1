@@ -215,64 +215,6 @@ function Request-AdminElevation {
     }
 }
                 
-                # Test downloaded script syntax
-                Write-ColorText "🔍 Memverifikasi script yang didownload..." -Color $Colors.Info
-                try {
-                    $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content $tempScript -Raw), [ref]$null)
-                    Write-LogEntry "Script syntax validation passed" "INFO"
-                } catch {
-                    Write-LogEntry "Script syntax validation failed: $($_.Exception.Message)" "ERROR"
-                    throw "Downloaded script has syntax errors: $($_.Exception.Message)"
-                }
-                
-                # Start elevated process with downloaded script and elevation flag
-
-                Write-LogEntry "Starting elevated process with script: $tempScript" "INFO"
-                
-                # Start elevated process without waiting (non-blocking)
-
-                
-                # Give elevated process time to start
-                Start-Sleep -Seconds 2
-                
-                # Check if elevated process is running
-                if ($process -and -not $process.HasExited) {
-                    Write-ColorText "✅ Elevated process started successfully (PID: $($process.Id))" -Color $Colors.Success
-                    Write-LogEntry "Elevated process started successfully with PID: $($process.Id)" "INFO"
-                    
-                    # Cleanup temporary script after successful elevation
-                    try {
-                        if (Test-Path $tempScript) {
-                            Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
-                            Write-LogEntry "Cleaned up temporary script: $tempScript" "INFO"
-                        }
-                    } catch {
-                        Write-LogEntry "Failed to cleanup temporary script: $($_.Exception.Message)" "WARNING"
-                    }
-                    
-                    # Close non-elevated terminal
-                    Write-ColorText "🔄 Menutup terminal non-elevated..." -Color $Colors.Info
-                    Write-ColorText "📋 Elevated terminal akan terbuka dalam beberapa detik..." -Color $Colors.Success
-                    Start-Sleep -Seconds 2
-                    
-                    # Exit non-elevated process
-                    exit 0
-                } else {
-                    Write-LogEntry "Elevated process failed to start" "WARNING"
-                    Write-ColorText "⚠️ Elevated process gagal dimulai" -Color $Colors.Warning
-                    
-                    # Analyze failure
-                    Write-ColorText "🔍 Analisis: Kemungkinan PowerShell version requirement atau permission issue" -Color $Colors.Warning
-                    Write-ColorText "💡 Solusi: Jalankan PowerShell sebagai Administrator atau update PowerShell" -Color $Colors.Info
-                    
-                    # Don't exit immediately, let user see the error
-                    Write-ColorText "⏳ Program akan melanjutkan dengan fitur terbatas..." -Color $Colors.Info
-                    Start-Sleep -Seconds 3
-
-
-}
-
-# ==================== REMOTE EXECUTION HANDLER ====================
 
 function Invoke-RemoteExecution {
     try {
