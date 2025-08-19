@@ -244,6 +244,27 @@ function Request-AdminElevation {
                 if ($process.ExitCode -ne 0) {
                     Write-LogEntry "Elevated process exited with code: $($process.ExitCode)" "WARNING"
                     Write-ColorText "⚠️ Proses elevated selesai dengan kode: $($process.ExitCode)" -Color $Colors.Warning
+                    
+                    # Analyze exit code
+                    switch ($process.ExitCode) {
+                        1 { 
+                            Write-ColorText "🔍 Analisis: Kemungkinan PowerShell version requirement atau permission issue" -Color $Colors.Warning
+                            Write-ColorText "💡 Solusi: Jalankan PowerShell sebagai Administrator atau update PowerShell" -Color $Colors.Info
+                        }
+                        2 { 
+                            Write-ColorText "🔍 Analisis: Script execution policy atau security issue" -Color $Colors.Warning
+                            Write-ColorText "💡 Solusi: Set ExecutionPolicy atau jalankan dari Administrator" -Color $Colors.Info
+                        }
+                        default {
+                            Write-ColorText "🔍 Analisis: Unknown error code, kemungkinan system issue" -Color $Colors.Warning
+                            Write-ColorText "💡 Solusi: Restart PowerShell atau jalankan sebagai Administrator" -Color $Colors.Info
+                        }
+                    }
+                    
+                    # Don't exit immediately, let user see the error
+                    Write-ColorText "⏳ Program akan melanjutkan dengan fitur terbatas..." -Color $Colors.Info
+                    Start-Sleep -Seconds 3
+                    return @{ Installed = $false; Method = 'ElevationFailed'; File = $tempScript; ExitCode = $process.ExitCode }
                 } else {
                     Write-LogEntry "Elevated process completed successfully" "INFO"
                 }
@@ -2197,28 +2218,36 @@ function Show-CountdownAndClose {
     Write-ColorText "👋 Menutup program..." -Color $Colors.Success
     Write-LogEntry "Auto-closing terminal after $Seconds seconds countdown" "INFO"
     
-    # Close the terminal window
+    # Close the terminal window with improved methods
     try {
         $host.UI.RawUI.WindowTitle = "Roblox Checker - Closing..."
         Start-Sleep -Milliseconds 500
         
-        # Try multiple methods to close terminal
+        # Method 1: Clean exit with proper cleanup
         try {
-            # Method 1: Force close current process
-            Stop-Process -Id $PID -Force -ErrorAction SilentlyContinue
+            # Ensure all cleanup is done
+            if (Get-Variable -Name "Global:LogFile" -ErrorAction SilentlyContinue) {
+                Write-LogEntry "Terminal closing initiated" "INFO"
+            }
+            
+            # Graceful exit
+            exit 0
         } catch {
+            # Method 2: Force exit if graceful fails
             try {
-                # Method 2: Exit PowerShell
-                exit 0
+                [Environment]::Exit(0)
             } catch {
+                # Method 3: Last resort - force process termination
                 try {
-                    # Method 3: Close console window
-                    $host.UI.RawUI.WindowTitle = "Closing..."
-                    Start-Sleep -Milliseconds 1000
-                    exit 0
+                    $currentProcess = Get-Process -Id $PID -ErrorAction SilentlyContinue
+                    if ($currentProcess) {
+                        $currentProcess.Kill()
+                    }
                 } catch {
-                    # Method 4: Force exit
-                    [Environment]::Exit(0)
+                    # Method 4: Final fallback
+                    Write-ColorText "💡 Tekan Enter untuk menutup manual..." -Color $Colors.Info
+                    Read-Host | Out-Null
+                    exit 0
                 }
             }
         }
@@ -2226,6 +2255,7 @@ function Show-CountdownAndClose {
         Write-LogEntry "Failed to auto-close terminal: $($_.Exception.Message)" "WARNING"
         Write-ColorText "💡 Tekan Enter untuk menutup manual..." -Color $Colors.Info
         Read-Host | Out-Null
+        exit 0
     }
 }
 
@@ -2605,7 +2635,18 @@ function Main {
 			Write-ColorText "🔐 Program memerlukan hak akses Administrator" -Color $Colors.Warning
 			Write-ColorText "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -Color $Colors.Info
 			Write-ColorText "🚀 Meminta elevation UAC..." -Color $Colors.Info
-			Request-AdminElevation
+			
+			try {
+				$elevationResult = Request-AdminElevation
+				if ($elevationResult -and $elevationResult.Method -eq 'ElevationFailed') {
+					Write-ColorText "⚠️ Elevation gagal, program akan berjalan dengan fitur terbatas" -Color $Colors.Warning
+					Write-ColorText "💡 Fitur yang tersedia: Diagnosis, Cache cleanup, Basic checks" -Color $Colors.Info
+					Write-ColorText "💡 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -Color $Colors.Warning
+				}
+			} catch {
+				Write-ColorText "⚠️ Elevation gagal: $($_.Exception.Message)" -Color $Colors.Warning
+				Write-ColorText "💡 Program akan berjalan dengan fitur terbatas" -Color $Colors.Info
+			}
 		} else {
 			Write-ColorText "✅ Berjalan dengan hak akses Administrator" -Color $Colors.Success
 		}
@@ -2678,9 +2719,10 @@ function Main {
 # ==================== SCRIPT ENTRY POINT ====================
 
 # Check PowerShell version
-if ($PSVersionTable.PSVersion.Major -lt 5) {
-    Write-Host "❌ PowerShell 5.1 atau lebih baru diperlukan!" -ForegroundColor Red
+if ($PSVersionTable.PSVersion.Major -lt 4) {
+    Write-Host "❌ PowerShell 4.0 atau lebih baru diperlukan!" -ForegroundColor Red
     Write-Host "💡 Versi Anda: $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
+    Write-Host "🔧 Script ini compatible dengan PowerShell 4.0+ untuk Windows 7/8/8.1/10/11" -ForegroundColor Yellow
     exit 1
 }
 
@@ -2689,5 +2731,20 @@ $Global:IsElevatedProcess = $args -contains "-Elevated"
 
 # Run main function
 if ($MyInvocation.InvocationName -ne '.') {
-    Main
+    try {
+        Main
+    } catch {
+        Write-ColorText "❌ Fatal error in main execution: $($_.Exception.Message)" -Color $Colors.Error
+        Write-LogEntry "Fatal error: $($_.Exception.Message)" "ERROR"
+    } finally {
+        # Ensure clean exit
+        try {
+            if (Get-Variable -Name "Global:LogFile" -ErrorAction SilentlyContinue) {
+                Write-LogEntry "Script execution completed" "INFO"
+            }
+        } catch {}
+        
+        # Clean exit
+        exit 0
+    }
 }
