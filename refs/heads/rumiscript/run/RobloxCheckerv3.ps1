@@ -281,6 +281,19 @@ function Invoke-RemoteExecution {
             
             # Execute downloaded script
             Write-Host "🚀 Menjalankan script yang didownload..." -ForegroundColor Cyan
+            # Typing dots animation (~3 seconds)
+            try {
+                $animationStart = Get-Date
+                $frames = @('.', '..', '...')
+                $i = 0
+                while (((Get-Date) - $animationStart).TotalSeconds -lt 3) {
+                    $dots = $frames[$i % $frames.Length]
+                    Write-Host ("`r⏳ Menginisialisasi{0}   " -f $dots) -ForegroundColor Yellow -NoNewline
+                    Start-Sleep -Milliseconds 300
+                    $i++
+                }
+                Write-Host ""
+            } catch {}
             & $tempScript
             
             # Cleanup temp file after execution
