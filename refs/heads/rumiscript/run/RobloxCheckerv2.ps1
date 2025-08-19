@@ -202,65 +202,18 @@ function Test-AdminPrivileges {
 
 function Request-AdminElevation {
     try {
-        Write-ColorText "🔐 Meminta elevation UAC..." -Color $Colors.Info
-        
-        # Check if running from irm | iex (no local file)
-        $scriptPath = $MyInvocation.MyCommand.Path
-        if (-not $scriptPath) { $scriptPath = $PSCommandPath }
-        
-        if (-not $scriptPath) {
-            # Running from irm | iex - download and run elevated
-            $tempScript = "$env:TEMP\RobloxChecker_Elevated.ps1"
-            $scriptUrl = "https://raw.githubusercontent.com/RumiKurumi/RMRBLXCKR/refs/heads/main/refs/heads/rumiscript/run/RobloxCheckerv2.ps1"
-            
-            try {
-                # Download with visual progress
-                
-                # Download with visual progress
-                Write-ColorText "📥 Downloading Roblox Checker Script..." -Color $Colors.Info
-                $downloadSuccess = Show-DownloadProgress -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
-                
-                if (-not $downloadSuccess) {
-                    throw "Download failed"
-                }
-                
-                # Verify download completion
-                Write-ColorText "🔍 Memverifikasi download..." -Color $Colors.Info
-                Start-Sleep -Seconds 1  # Give file system time to complete
-                
-                if (-not (Test-Path $tempScript)) {
-                    throw "Downloaded script not found after verification"
-                }
-                
-                $finalSize = (Get-Item $tempScript).Length
-                if ($finalSize -lt 1000) {
-                    throw "Downloaded script too small ($finalSize bytes), may be corrupted"
-                }
-                
-                Write-ColorText "✅ Download verification berhasil ($([math]::Round($finalSize / 1KB, 1)) KB)" -Color $Colors.Success
-                Write-LogEntry "Downloaded script to: $tempScript (Size: $finalSize bytes)" "INFO"
-                
-                # Verify downloaded script
-                if (-not (Test-Path $tempScript)) {
-                    throw "Downloaded script not found: $tempScript"
-                }
-                
-                $scriptSize = (Get-Item $tempScript).Length
-                Write-LogEntry "Downloaded script size: $scriptSize bytes" "INFO"
-                
-                if ($scriptSize -lt 1000) {
-                    throw "Downloaded script seems too small ($scriptSize bytes), may be corrupted"
-                }
-                
-                # Check if script contains expected content
-                $scriptContent = Get-Content $tempScript -Raw -ErrorAction SilentlyContinue
-                if (-not $scriptContent -or $scriptContent.Length -lt 100) {
-                    throw "Downloaded script content is empty or too short"
-                }
-                
-                if (-not $scriptContent.Contains("#Requires -Version 4.0")) {
-                    Write-LogEntry "Warning: Downloaded script may not be the correct file" "WARNING"
-                }
+        Write-ColorText "🔐 Program memerlukan hak akses Administrator" -Color $Colors.Warning
+        Write-ColorText "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -Color $Colors.Info
+        Write-ColorText "💡 Jalankan PowerShell sebagai Administrator dan jalankan script ini lagi" -Color $Colors.Info
+        Write-ColorText "🔗 Atau download manual dari: https://github.com/RumiKurumi/RMRBLXCKR" -Color $Colors.Info
+        Write-ColorText "⏳ Program akan menutup dalam 2 detik..." -Color $Colors.Warning
+        Start-Sleep -Seconds 2
+        exit 1
+    } catch {
+        Write-ColorText "❌ Error: $($_.Exception.Message)" -Color $Colors.Error
+        exit 1
+    }
+}
                 
                 # Test downloaded script syntax
                 Write-ColorText "🔍 Memverifikasi script yang didownload..." -Color $Colors.Info
@@ -276,73 +229,132 @@ function Request-AdminElevation {
                 Write-ColorText "🚀 Memulai proses elevated..." -Color $Colors.Info
                 Write-LogEntry "Starting elevated process with script: $tempScript" "INFO"
                 
-                $process = Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScript`" -Elevated" -Verb RunAs -PassThru -Wait
+                # Start elevated process without waiting (non-blocking)
+                $process = Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScript`" -Elevated" -Verb RunAs -PassThru
                 
-                # Check process exit code
-                if ($process.ExitCode -ne 0) {
-                    Write-LogEntry "Elevated process exited with code: $($process.ExitCode)" "WARNING"
-                    Write-ColorText "⚠️ Proses elevated selesai dengan kode: $($process.ExitCode)" -Color $Colors.Warning
+                # Give elevated process time to start
+                Start-Sleep -Seconds 2
+                
+                # Check if elevated process is running
+                if ($process -and -not $process.HasExited) {
+                    Write-ColorText "✅ Elevated process started successfully (PID: $($process.Id))" -Color $Colors.Success
+                    Write-LogEntry "Elevated process started successfully with PID: $($process.Id)" "INFO"
                     
-                    # Analyze exit code
-                    switch ($process.ExitCode) {
-                        1 { 
-                            Write-ColorText "🔍 Analisis: Kemungkinan PowerShell version requirement atau permission issue" -Color $Colors.Warning
-                            Write-ColorText "💡 Solusi: Jalankan PowerShell sebagai Administrator atau update PowerShell" -Color $Colors.Info
+                    # Cleanup temporary script after successful elevation
+                    try {
+                        if (Test-Path $tempScript) {
+                            Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
+                            Write-LogEntry "Cleaned up temporary script: $tempScript" "INFO"
                         }
-                        2 { 
-                            Write-ColorText "🔍 Analisis: Script execution policy atau security issue" -Color $Colors.Warning
-                            Write-ColorText "💡 Solusi: Set ExecutionPolicy atau jalankan dari Administrator" -Color $Colors.Info
-                        }
-                        default {
-                            Write-ColorText "🔍 Analisis: Unknown error code, kemungkinan system issue" -Color $Colors.Warning
-                            Write-ColorText "💡 Solusi: Restart PowerShell atau jalankan sebagai Administrator" -Color $Colors.Info
-                        }
+                    } catch {
+                        Write-LogEntry "Failed to cleanup temporary script: $($_.Exception.Message)" "WARNING"
                     }
+                    
+                    # Close non-elevated terminal
+                    Write-ColorText "🔄 Menutup terminal non-elevated..." -Color $Colors.Info
+                    Write-ColorText "📋 Elevated terminal akan terbuka dalam beberapa detik..." -Color $Colors.Success
+                    Start-Sleep -Seconds 2
+                    
+                    # Exit non-elevated process
+                    exit 0
+                } else {
+                    Write-LogEntry "Elevated process failed to start" "WARNING"
+                    Write-ColorText "⚠️ Elevated process gagal dimulai" -Color $Colors.Warning
+                    
+                    # Analyze failure
+                    Write-ColorText "🔍 Analisis: Kemungkinan PowerShell version requirement atau permission issue" -Color $Colors.Warning
+                    Write-ColorText "💡 Solusi: Jalankan PowerShell sebagai Administrator atau update PowerShell" -Color $Colors.Info
                     
                     # Don't exit immediately, let user see the error
                     Write-ColorText "⏳ Program akan melanjutkan dengan fitur terbatas..." -Color $Colors.Info
                     Start-Sleep -Seconds 3
-                    return @{ Installed = $false; Method = 'ElevationFailed'; File = $tempScript; ExitCode = $process.ExitCode }
-                } else {
-                    Write-LogEntry "Elevated process completed successfully" "INFO"
-                }
-                
-                # Cleanup temporary script after elevation
-                try {
-                    if (Test-Path $tempScript) {
-                        Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
-                        Write-LogEntry "Cleaned up temporary script: $tempScript" "INFO"
-                    }
-                } catch {
-                    Write-LogEntry "Failed to cleanup temporary script: $($_.Exception.Message)" "WARNING"
-                }
-                
-                exit 0
-            } catch {
-                # Cleanup on error too
-                try {
-                    if (Test-Path $tempScript) {
-                        Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
-                        Write-LogEntry "Cleaned up temporary script after error: $tempScript" "INFO"
-                    }
-                } catch {}
-                
-                Write-ColorText "❌ Gagal download script untuk elevation: $($_.Exception.Message)" -Color $Colors.Error
-                Write-LogEntry "Failed to download script for elevation: $($_.Exception.Message)" "ERROR"
-                throw
+                    return @{ Installed = $false; Method = 'ElevationFailed'; File = $tempScript; ExitCode = -1 }
+
+}
+
+# ==================== REMOTE EXECUTION HANDLER ====================
+
+function Handle-RemoteExecution {
+    try {
+        # Check if running from irm | iex (no local file)
+        $scriptPath = $MyInvocation.MyCommand.Path
+        if (-not $scriptPath) { $scriptPath = $PSCommandPath }
+        
+        if (-not $scriptPath) {
+            # Running from irm | iex - download and run
+            $tempScript = "$env:TEMP\RobloxChecker_Remote.ps1"
+            $scriptUrl = "https://raw.githubusercontent.com/RumiKurumi/RMRBLXCKR/refs/heads/main/refs/heads/rumiscript/run/RobloxCheckerv2.ps1"
+            
+            Write-ColorText "📥 Downloading Roblox Checker Script..." -Color $Colors.Info
+            $downloadSuccess = Show-DownloadProgress -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
+            
+            if (-not $downloadSuccess) {
+                throw "Download failed"
             }
-        } else {
-            # Running from local file
-            Write-LogEntry "Requesting admin elevation for local script: $scriptPath" "INFO"
-            Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`" -Elevated" -Verb RunAs -Wait
+            
+            # Verify download completion
+            Write-ColorText "🔍 Memverifikasi download..." -Color $Colors.Info
+            Start-Sleep -Seconds 1
+            
+            if (-not (Test-Path $tempScript)) {
+                throw "Downloaded script not found after verification"
+            }
+            
+            $finalSize = (Get-Item $tempScript).Length
+            if ($finalSize -lt 1000) {
+                throw "Downloaded script too small ($finalSize bytes), may be corrupted"
+            }
+            
+            Write-ColorText "✅ Download verification berhasil ($([math]::Round($finalSize / 1KB, 1)) KB)" -Color $Colors.Success
+            Write-LogEntry "Downloaded script to: $tempScript (Size: $finalSize bytes)" "INFO"
+            
+            # Verify script content
+            Write-ColorText "🔍 Memverifikasi script yang didownload..." -Color $Colors.Info
+            try {
+                $scriptContent = Get-Content $tempScript -Raw -ErrorAction Stop
+                if (-not $scriptContent -or $scriptContent.Length -lt 1000) {
+                    throw "Downloaded script content is empty or too small"
+                }
+                
+                # Basic syntax check
+                $null = [System.Management.Automation.PSParser]::Tokenize($scriptContent, [ref]$null)
+                Write-ColorText "✅ Script syntax verification berhasil" -Color $Colors.Success
+                Write-LogEntry "Script syntax validation passed" "INFO"
+            } catch {
+                Write-LogEntry "Script syntax validation failed: $($_.Exception.Message)" "ERROR"
+                throw "Downloaded script has syntax errors: $($_.Exception.Message)"
+            }
+            
+            # Register cleanup for temp file
+            $Global:TempScriptToCleanup = $tempScript
+            
+            # Execute downloaded script
+            Write-ColorText "🚀 Menjalankan script yang didownload..." -Color $Colors.Info
+            & $tempScript
+            
+            # Cleanup temp file after execution
+            try {
+                if (Test-Path $tempScript) {
+                    Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
+                    Write-LogEntry "Cleaned up temporary script: $tempScript" "INFO"
+                }
+            } catch {
+                Write-LogEntry "Failed to cleanup temporary script: $($_.Exception.Message)" "WARNING"
+            }
+            
             exit 0
         }
     } catch {
-        Write-ColorText "❌ Gagal meminta elevation admin: $($_.Exception.Message)" -Color $Colors.Error
-        Write-LogEntry "Admin elevation failed: $($_.Exception.Message)" "ERROR"
-        Write-ColorText "💡 Jalankan PowerShell sebagai Administrator dan jalankan script ini lagi" -Color $Colors.Info
-        Write-ColorText "🔗 Atau download manual dari: https://github.com/RumiKurumi/RMRBLXCKR" -Color $Colors.Info
-        Read-Host "Tekan Enter untuk keluar"
+        Write-ColorText "❌ Error dalam remote execution: $($_.Exception.Message)" -Color $Colors.Error
+        Write-LogEntry "Remote execution failed: $($_.Exception.Message)" "ERROR"
+        
+        # Cleanup on error
+        try {
+            if ($Global:TempScriptToCleanup -and (Test-Path $Global:TempScriptToCleanup)) {
+                Remove-Item $Global:TempScriptToCleanup -Force -ErrorAction SilentlyContinue
+            }
+        } catch {}
+        
         exit 1
     }
 }
@@ -2322,6 +2334,27 @@ function Invoke-SafetyCleanup {
             }
         }
         
+        # Clean remote execution temporary script
+        $remoteTempScript = "$env:TEMP\RobloxChecker_Remote.ps1"
+        if (Test-Path $remoteTempScript) {
+            try {
+                Remove-Item $remoteTempScript -Force -ErrorAction SilentlyContinue
+                Write-LogEntry "Cleaned remote temp script: $remoteTempScript" "INFO"
+            } catch {
+                Write-LogEntry "Could not clean remote temp script: $($_.Exception.Message)" "WARNING"
+            }
+        }
+        
+        # Clean global temp script if exists
+        if ($Global:TempScriptToCleanup -and (Test-Path $Global:TempScriptToCleanup)) {
+            try {
+                Remove-Item $Global:TempScriptToCleanup -Force -ErrorAction SilentlyContinue
+                Write-LogEntry "Cleaned global temp script: $Global:TempScriptToCleanup" "INFO"
+            } catch {
+                Write-LogEntry "Could not clean global temp script: $($_.Exception.Message)" "WARNING"
+            }
+        }
+        
         # Clean processes
         foreach ($processId in $Global:ProcessesToCleanup) {
             try {
@@ -2806,58 +2839,22 @@ function Register-CleanupHandlers {
 
 function Main {
 	try {
-		# Debug: Show we're in Main function
-		if ($Global:IsElevatedProcess) {
-			Write-Host "🔧 Main function started in elevated mode" -ForegroundColor Green
-			Start-Sleep -Seconds 1
-		}
+		# Handle remote execution first (irm | iex)
+		Handle-RemoteExecution
 		
-		# Check admin privileges first
+		# Check admin privileges - if not admin, exit immediately
 		if (-not (Test-AdminPrivileges)) {
-			Write-ColorText "🔐 Program memerlukan hak akses Administrator" -Color $Colors.Warning
-			Write-ColorText "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -Color $Colors.Info
-			Write-ColorText "🚀 Meminta elevation UAC..." -Color $Colors.Info
-			
-			try {
-				$elevationResult = Request-AdminElevation
-				if ($elevationResult -and $elevationResult.Method -eq 'ElevationFailed') {
-					Write-ColorText "⚠️ Elevation gagal, program akan berjalan dengan fitur terbatas" -Color $Colors.Warning
-					Write-ColorText "💡 Fitur yang tersedia: Diagnosis, Cache cleanup, Basic checks" -Color $Colors.Info
-					Write-ColorText "💡 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -Color $Colors.Warning
-				}
-			} catch {
-				Write-ColorText "⚠️ Elevation gagal: $($_.Exception.Message)" -Color $Colors.Warning
-				Write-ColorText "💡 Program akan berjalan dengan fitur terbatas" -Color $Colors.Info
-			}
-		} else {
-			Write-ColorText "✅ Berjalan dengan hak akses Administrator" -Color $Colors.Success
+			Request-AdminElevation
+			# If we reach here, something went wrong with elevation
+			exit 1
 		}
 		
-		# If this is an elevated process, show success message
-		if ($Global:IsElevatedProcess) {
-			Write-ColorText "🚀 Elevation berhasil! Program berjalan dengan hak akses Administrator" -Color $Colors.Success
-			Write-LogEntry "Elevated process started successfully" "INFO"
-		}
+		Write-ColorText "✅ Berjalan dengan hak akses Administrator" -Color $Colors.Success
 		
-		# Debug: Step-by-step initialization
-		if ($Global:IsElevatedProcess) {
-			Write-Host "🔧 Step 1: Initializing environment..." -ForegroundColor Yellow
-		}
+		# Initialize environment
 		Initialize-Environment
-		
-		if ($Global:IsElevatedProcess) {
-			Write-Host "🔧 Step 2: Registering cleanup handlers..." -ForegroundColor Yellow
-		}
 		Register-CleanupHandlers
-		
-		if ($Global:IsElevatedProcess) {
-			Write-Host "🔧 Step 3: Setting execution policy..." -ForegroundColor Yellow
-		}
 		$originalPolicy = Set-ExecutionPolicyTemporary
-		
-		if ($Global:IsElevatedProcess) {
-			Write-Host "🔧 Step 4: Starting main menu..." -ForegroundColor Yellow
-		}
 		try {
 			Write-LogEntry "Main menu started" "INFO"
 		} catch {
@@ -2928,74 +2925,16 @@ if ($PSVersionTable.PSVersion.Major -lt 4) {
     exit 1
 }
 
-# Check if this is an elevated process
-$Global:IsElevatedProcess = $args -contains "-Elevated"
-
-# Debug: Show elevated status with longer pause
-if ($Global:IsElevatedProcess) {
-    try {
-        Write-Host "🚀 Elevated process started successfully" -ForegroundColor Green
-        Write-Host "📋 PowerShell Version: $($PSVersionTable.PSVersion)" -ForegroundColor Cyan
-        Write-Host "🔐 Admin Rights: $(if (Test-AdminPrivileges) { 'Yes' } else { 'No' })" -ForegroundColor Cyan
-        Write-Host "⏳ Initializing elevated environment..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
-    } catch {
-        Write-Host "⚠️ Debug info error: $($_.Exception.Message)" -ForegroundColor Red
-        Start-Sleep -Seconds 3
-    }
-}
-
 # Run main function
 if ($MyInvocation.InvocationName -ne '.') {
     try {
-        # Debug: Show we're about to start Main
-        if ($Global:IsElevatedProcess) {
-            Write-Host "🚀 About to start Main function..." -ForegroundColor Green
-            Start-Sleep -Seconds 1
-        }
-        
         Main
     } catch {
-        # Enhanced error handling for elevated process
-        Write-Host "`n" -ForegroundColor Red
-        Write-Host "❌❌❌ FATAL ERROR DETECTED ❌❌❌" -ForegroundColor Red
-        Write-Host "================================================" -ForegroundColor Red
-        Write-Host "Error Type: $($_.Exception.GetType().Name)" -ForegroundColor Yellow
-        Write-Host "Error Message: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host "Error Location: $($_.InvocationInfo.ScriptName):$($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor Yellow
-        Write-Host "================================================" -ForegroundColor Red
-        
-        # Show stack trace for debugging
-        Write-Host "`nStack Trace:" -ForegroundColor Cyan
-        $_.ScriptStackTrace -split "`n" | ForEach-Object {
-            Write-Host "  $_" -ForegroundColor Gray
-        }
-        
+        Write-Host "`n❌ Error: $($_.Exception.Message)" -ForegroundColor Red
         try {
             Write-LogEntry "Fatal error: $($_.Exception.Message)" "ERROR"
-        } catch {
-            Write-Host "⚠️ Could not write to log file" -ForegroundColor Red
-        }
-        
-        # Give user plenty of time to read error
-        Write-Host "`n" -ForegroundColor Red
-        Write-Host "⏳ This window will close in 10 seconds..." -ForegroundColor Yellow
-        Write-Host "📋 You can copy the error message above" -ForegroundColor Yellow
-        
-        # Countdown
-        for ($i = 10; $i -gt 0; $i--) {
-            Write-Host "`rClosing in $i seconds... " -ForegroundColor Yellow -NoNewline
-            Start-Sleep -Seconds 1
-        }
-        Write-Host "`n" -ForegroundColor Yellow
-        
-        # Try to pause for user input
-        try {
-            Write-Host "Press any key to close immediately..." -ForegroundColor Green
-            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        } catch {
-            Write-Host "Auto-closing..." -ForegroundColor Gray
-        }
+        } catch {}
+        exit 1
     } finally {
         # Ensure clean exit
         try {
@@ -3003,8 +2942,6 @@ if ($MyInvocation.InvocationName -ne '.') {
                 Write-LogEntry "Script execution completed" "INFO"
             }
         } catch {}
-        
-        # Clean exit
         exit 0
     }
 }
