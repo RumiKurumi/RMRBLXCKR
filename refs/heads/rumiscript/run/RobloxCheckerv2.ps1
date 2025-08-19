@@ -163,18 +163,24 @@ function Test-AdminPrivileges {
 }
 
 function Request-AdminElevation {
-    Write-ColorText "🔐 Program memerlukan hak akses Administrator untuk berjalan dengan optimal" -Color $Colors.Warning
-    Write-ColorText "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -Color $Colors.Info
-    
     try {
+        # Get current script path
         $scriptPath = $MyInvocation.MyCommand.Path
         if (-not $scriptPath) { $scriptPath = $PSCommandPath }
-        if (-not $scriptPath) { $scriptPath = "powershell.exe" }
+        if (-not $scriptPath) { 
+            Write-ColorText "❌ Tidak dapat menentukan path script" -Color $Colors.Error
+            exit 1
+        }
         
-        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"", "-Verb", "RunAs" -Wait
+        Write-ColorText "🔐 Meminta elevation UAC..." -Color $Colors.Info
+        Write-LogEntry "Requesting admin elevation for script: $scriptPath" "INFO"
+        
+        # Start new elevated process and exit current one
+        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -Wait
         exit 0
     } catch {
         Write-ColorText "❌ Gagal meminta elevation admin: $($_.Exception.Message)" -Color $Colors.Error
+        Write-LogEntry "Admin elevation failed: $($_.Exception.Message)" "ERROR"
         Write-ColorText "💡 Jalankan PowerShell sebagai Administrator dan jalankan script ini lagi" -Color $Colors.Info
         Read-Host "Tekan Enter untuk keluar"
         exit 1
@@ -2243,12 +2249,8 @@ function Main {
 		if (-not (Test-AdminPrivileges)) {
 			Write-ColorText "🔐 Program memerlukan hak akses Administrator" -Color $Colors.Warning
 			Write-ColorText "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -Color $Colors.Info
-			$elevate = Read-Host "Apakah ingin menjalankan sebagai Administrator? (Y/N)"
-			if ($elevate -eq 'Y' -or $elevate -eq 'y') {
-				Request-AdminElevation
-			} else {
-				Write-ColorText "⚠️ Program akan berjalan dengan fitur terbatas" -Color $Colors.Warning
-			}
+			Write-ColorText "🚀 Meminta elevation UAC..." -Color $Colors.Info
+			Request-AdminElevation
 		} else {
 			Write-ColorText "✅ Berjalan dengan hak akses Administrator" -Color $Colors.Success
 		}
