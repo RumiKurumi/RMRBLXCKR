@@ -265,6 +265,17 @@ function Invoke-RemoteExecution {
                 throw "Downloaded script has syntax errors: $($_.Exception.Message)"
             }
             
+            # Re-encode downloaded script as UTF-8 with BOM to avoid mojibake/parse issues on PS 5/Windows console
+            try {
+                $bytes = [System.IO.File]::ReadAllBytes($tempScript)
+                $textUtf8 = [System.Text.Encoding]::UTF8.GetString($bytes)
+                $utf8Bom = New-Object System.Text.UTF8Encoding($true)
+                [System.IO.File]::WriteAllText($tempScript, $textUtf8, $utf8Bom)
+            } catch {
+                # If re-encode fails, continue with original file but warn in console
+                Write-Host ("⚠️ Gagal re-encode UTF-8 BOM: {0}" -f ($_.Exception.Message)) -ForegroundColor Yellow
+            }
+            
             # Register cleanup for temp file
             $Global:TempScriptToCleanup = $tempScript
             
