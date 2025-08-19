@@ -283,7 +283,7 @@ function Invoke-RemoteExecution {
         if (-not $scriptPath) {
             # Running from irm | iex - download and run
             $tempScript = "$env:TEMP\RobloxChecker_Remote.ps1"
-            $scriptUrl = "https://raw.githubusercontent.com/RumiKurumi/RMRBLXCKR/refs/heads/main/refs/heads/rumiscript/run/RobloxCheckerv2.ps1"
+            $scriptUrl = "https://raw.githubusercontent.com/RumiKurumi/RMRBLXCKR/refs/heads/main/refs/heads/rumiscript/run/RobloxCheckerv3.ps1"
             
             Write-Host "📥 Downloading Roblox Checker Script..." -ForegroundColor Cyan
             $downloadSuccess = Show-DownloadProgress -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
