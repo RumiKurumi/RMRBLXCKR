@@ -227,8 +227,8 @@ function Invoke-RemoteExecution {
             $tempScript = "$env:TEMP\RobloxChecker_Remote.ps1"
             $scriptUrl = "https://raw.githubusercontent.com/RumiKurumi/RMRBLXCKR/refs/heads/main/refs/heads/rumiscript/run/RobloxCheckerv3.ps1"
             
-            Write-Host "📥 Downloading Roblox Checker Script..." -ForegroundColor Cyan
-            $downloadSuccess = Show-DownloadProgress -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
+            Write-Host "📥 Downloading Rumi Roblox Checker Script..." -ForegroundColor Cyan
+            $downloadSuccess = Show-DownloadProgress -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script by Rumi"
             
             if (-not $downloadSuccess) {
                 throw "Download failed"
