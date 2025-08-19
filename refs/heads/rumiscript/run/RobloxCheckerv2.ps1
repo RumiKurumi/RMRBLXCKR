@@ -2833,16 +2833,16 @@ function Register-CleanupHandlers {
 
 function Main {
 	try {
-		# Handle remote execution first (irm | iex)
-		Invoke-RemoteExecution
-		
-		# Check admin privileges - if not admin, exit immediately
+		# Check admin privileges first - if not admin, exit immediately
 		if (-not (Test-AdminPrivileges)) {
 			Request-AdminElevation
-			# If we reach here, something went wrong with elevation
+			# If we reach here, script will exit; safeguard anyway
 			exit 1
 		}
-		
+
+		# Admin shell confirmed; if executed via irm|iex, download and run the script from temp
+		Invoke-RemoteExecution
+
 		Write-ColorText "✅ Berjalan dengan hak akses Administrator" -Color $Colors.Success
 		
 		# Initialize environment
