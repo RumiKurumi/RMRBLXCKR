@@ -172,18 +172,72 @@ function Request-AdminElevation {
         
         if (-not $scriptPath) {
             # Running from irm | iex - download and run elevated
-            Write-ColorText "📥 Script dijalankan dari remote, mendownload untuk elevation..." -Color $Colors.Info
-            Write-LogEntry "Script running from remote, downloading for elevation" "INFO"
-            
             $tempScript = "$env:TEMP\RobloxChecker_Elevated.ps1"
             $scriptUrl = "https://raw.githubusercontent.com/RumiKurumi/RMRBLXCKR/refs/heads/main/refs/heads/rumiscript/run/RobloxCheckerv2.ps1"
             
             try {
-                Invoke-WebRequest -Uri $scriptUrl -OutFile $tempScript -UseBasicParsing
+                # Download with visual progress
+                
+                # Try progress bar first, fallback to spinner if it fails
+                $downloadSuccess = $false
+                try {
+                    $downloadSuccess = Show-DownloadProgress -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
+                } catch {
+                    Write-LogEntry "Progress bar download failed, trying spinner: $($_.Exception.Message)" "WARNING"
+                    $downloadSuccess = Show-DownloadSpinner -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
+                }
+                
+                if (-not $downloadSuccess) {
+                    throw "Download failed with both progress bar and spinner methods"
+                }
+                
                 Write-LogEntry "Downloaded script to: $tempScript" "INFO"
                 
+                # Verify downloaded script
+                if (-not (Test-Path $tempScript)) {
+                    throw "Downloaded script not found: $tempScript"
+                }
+                
+                $scriptSize = (Get-Item $tempScript).Length
+                Write-LogEntry "Downloaded script size: $scriptSize bytes" "INFO"
+                
+                if ($scriptSize -lt 1000) {
+                    throw "Downloaded script seems too small ($scriptSize bytes), may be corrupted"
+                }
+                
+                # Check if script contains expected content
+                $scriptContent = Get-Content $tempScript -Raw -ErrorAction SilentlyContinue
+                if (-not $scriptContent -or $scriptContent.Length -lt 100) {
+                    throw "Downloaded script content is empty or too short"
+                }
+                
+                if (-not $scriptContent.Contains("#Requires -Version 4.0")) {
+                    Write-LogEntry "Warning: Downloaded script may not be the correct file" "WARNING"
+                }
+                
+                # Test downloaded script syntax
+                Write-ColorText "🔍 Memverifikasi script yang didownload..." -Color $Colors.Info
+                try {
+                    $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content $tempScript -Raw), [ref]$null)
+                    Write-LogEntry "Script syntax validation passed" "INFO"
+                } catch {
+                    Write-LogEntry "Script syntax validation failed: $($_.Exception.Message)" "ERROR"
+                    throw "Downloaded script has syntax errors: $($_.Exception.Message)"
+                }
+                
                 # Start elevated process with downloaded script and elevation flag
-                Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScript`" -Elevated" -Verb RunAs -Wait
+                Write-ColorText "🚀 Memulai proses elevated..." -Color $Colors.Info
+                Write-LogEntry "Starting elevated process with script: $tempScript" "INFO"
+                
+                $process = Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$tempScript`" -Elevated" -Verb RunAs -PassThru -Wait
+                
+                # Check process exit code
+                if ($process.ExitCode -ne 0) {
+                    Write-LogEntry "Elevated process exited with code: $($process.ExitCode)" "WARNING"
+                    Write-ColorText "⚠️ Proses elevated selesai dengan kode: $($process.ExitCode)" -Color $Colors.Warning
+                } else {
+                    Write-LogEntry "Elevated process completed successfully" "INFO"
+                }
                 
                 # Cleanup temporary script after elevation
                 try {
@@ -2120,6 +2174,137 @@ function Show-CountdownAndClose {
         Write-LogEntry "Failed to auto-close terminal: $($_.Exception.Message)" "WARNING"
         Write-ColorText "💡 Tekan Enter untuk menutup manual..." -Color $Colors.Info
         Read-Host | Out-Null
+    }
+}
+
+function Show-DownloadProgress {
+    param(
+        [string]$Url,
+        [string]$OutFile,
+        [string]$Description = "Downloading"
+    )
+    
+    try {
+        Write-ColorText "📥 $Description..." -Color $Colors.Info
+        Write-ColorText "🔗 URL: $Url" -Color $Colors.Accent
+        
+        # Create WebClient for progress tracking
+        $webClient = New-Object System.Net.WebClient
+        
+        # Register progress event
+        $webClient.DownloadProgressChanged = {
+            param($sender, $e)
+            $percent = $e.ProgressPercentage
+            $bytesReceived = $e.BytesReceived
+            $totalBytes = $e.TotalBytesToReceive
+            
+            # Convert to KB/MB
+            $receivedKB = [math]::Round($bytesReceived / 1KB, 1)
+            $totalKB = [math]::Round($totalBytes / 1KB, 1)
+            
+            # Progress bar (20 characters)
+            $progressBarLength = 20
+            $filledLength = [math]::Floor($percent / 100 * $progressBarLength)
+            $progressBar = "█" * $filledLength + "░" * ($progressBarLength - $filledLength)
+            
+            # Update progress display
+            Write-ColorText "`r📊 [$progressBar] $percent% ($receivedKB KB / $totalKB KB)" -Color $Colors.Accent -NoNewLine
+        }
+        
+        # Register completion event
+        $webClient.DownloadFileCompleted = {
+            param($sender, $e)
+            if ($e.Cancelled) {
+                Write-ColorText "`n❌ Download dibatalkan" -Color $Colors.Error
+            } elseif ($e.Error) {
+                Write-ColorText "`n❌ Download gagal: $($e.Error.Message)" -Color $Colors.Error
+            } else {
+                Write-ColorText "`n✅ Download selesai!" -Color $Colors.Success
+            }
+        }
+        
+        # Start download
+        $webClient.DownloadFileAsync($Url, $OutFile)
+        
+        # Wait for completion
+        while ($webClient.IsBusy) {
+            Start-Sleep -Milliseconds 100
+        }
+        
+        # Check if download was successful
+        if (Test-Path $OutFile) {
+            $fileSize = (Get-Item $OutFile).Length
+            $fileSizeKB = [math]::Round($fileSize / 1KB, 1)
+            Write-ColorText "📁 File tersimpan: $OutFile ($fileSizeKB KB)" -Color $Colors.Success
+            return $true
+        } else {
+            Write-ColorText "❌ File tidak ditemukan setelah download" -Color $Colors.Error
+            return $false
+        }
+        
+    } catch {
+        Write-ColorText "❌ Error dalam download: $($_.Exception.Message)" -Color $Colors.Error
+        return $false
+    } finally {
+        if ($webClient) {
+            $webClient.Dispose()
+        }
+    }
+}
+
+function Show-DownloadSpinner {
+    param(
+        [string]$Url,
+        [string]$OutFile,
+        [string]$Description = "Downloading"
+    )
+    
+    Write-ColorText "📥 $Description..." -Color $Colors.Info
+    Write-ColorText "🔗 URL: $Url" -Color $Colors.Accent
+    
+    $spinners = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+    $counter = 0
+    $startTime = Get-Date
+    
+    # Start download in background
+    $job = Start-Job -ScriptBlock {
+        param($url, $outFile)
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing
+            return "SUCCESS"
+        } catch {
+            return "ERROR: $($_.Exception.Message)"
+        }
+    } -ArgumentList $Url, $OutFile
+    
+    # Show spinner while downloading
+    while ($job.State -eq "Running") {
+        $spinner = $spinners[$counter % $spinners.Length]
+        $elapsed = (Get-Date) - $startTime
+        $elapsedStr = "{0:mm\:ss}" -f $elapsed
+        
+        Write-ColorText "`r$spinner Downloading... ($elapsedStr)" -Color $Colors.Accent -NoNewLine
+        Start-Sleep -Milliseconds 100
+        $counter++
+    }
+    
+    # Get result
+    $result = Receive-Job $job
+    Remove-Job $job
+    
+    if ($result -eq "SUCCESS") {
+        if (Test-Path $OutFile) {
+            $fileSize = (Get-Item $OutFile).Length
+            $fileSizeKB = [math]::Round($fileSize / 1KB, 1)
+            Write-ColorText "`n✅ Download selesai! ($fileSizeKB KB)" -Color $Colors.Success
+            return $true
+        } else {
+            Write-ColorText "`n❌ File tidak ditemukan setelah download" -Color $Colors.Error
+            return $false
+        }
+    } else {
+        Write-ColorText "`n❌ Download gagal: $result" -Color $Colors.Error
+        return $false
     }
 }
 
