@@ -2187,16 +2187,36 @@ function Request-AdminRights {
 
 function Set-ExecutionPolicyTemporary {
     try {
-        $currentPolicy = Get-ExecutionPolicy -Scope CurrentUser
-        Write-LogEntry "Current execution policy: $currentPolicy" "INFO"
+        $currentPolicy = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
+        try {
+            Write-LogEntry "Current execution policy: $currentPolicy" "INFO"
+        } catch {
+            # Silent fallback for logging
+        }
         
         if ($currentPolicy -eq "Restricted") {
-            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-            Write-LogEntry "Execution policy temporarily changed to RemoteSigned" "INFO"
-            return $currentPolicy
+            try {
+                Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force -ErrorAction SilentlyContinue
+                try {
+                    Write-LogEntry "Execution policy temporarily changed to RemoteSigned" "INFO"
+                } catch {
+                    # Silent fallback for logging
+                }
+                return $currentPolicy
+            } catch {
+                try {
+                    Write-LogEntry "Could not change execution policy: $($_.Exception.Message)" "WARNING"
+                } catch {
+                    # Silent fallback for logging
+                }
+            }
         }
     } catch {
-        Write-LogEntry "Could not change execution policy: $($_.Exception.Message)" "WARNING"
+        try {
+            Write-LogEntry "Could not check execution policy: $($_.Exception.Message)" "WARNING"
+        } catch {
+            # Silent fallback for logging
+        }
     }
     return $null
 }
@@ -2206,10 +2226,18 @@ function Restore-ExecutionPolicy {
     
     if ($OriginalPolicy -and $OriginalPolicy -eq "Restricted") {
         try {
-            Set-ExecutionPolicy -ExecutionPolicy $OriginalPolicy -Scope CurrentUser -Force
-            Write-LogEntry "Execution policy restored to: $OriginalPolicy" "INFO"
+            Set-ExecutionPolicy -ExecutionPolicy $OriginalPolicy -Scope CurrentUser -Force -ErrorAction SilentlyContinue
+            try {
+                Write-LogEntry "Execution policy restored to: $OriginalPolicy" "INFO"
+            } catch {
+                # Silent fallback for logging
+            }
         } catch {
-            Write-LogEntry "Could not restore execution policy: $($_.Exception.Message)" "WARNING"
+            try {
+                Write-LogEntry "Could not restore execution policy: $($_.Exception.Message)" "WARNING"
+            } catch {
+                # Silent fallback for logging
+            }
         }
     }
 }
@@ -2697,19 +2725,29 @@ function Invoke-CacheCleanOnly {
 # ==================== SIGNAL HANDLERS ====================
 
 function Register-CleanupHandlers {
-    # Register Ctrl+C handler
-    [Console]::TreatControlCAsInput = $false
-    Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-        Write-Host "`n🛑 Pembatalan terdeteksi, melakukan cleanup..." -ForegroundColor $Colors.Warning
-        Invoke-SafetyCleanup
-        # Auto-close after cleanup
-        Start-Sleep -Seconds 2
-        try { exit 0 } catch {}
-    } | Out-Null
+    # Register Ctrl+C handler - simplified and robust
+    try {
+        [Console]::TreatControlCAsInput = $false
+    } catch {
+        # Silent fallback if console control not available
+    }
     
-    # Register exit handler
-    $null = Register-ObjectEvent -InputObject ([System.AppDomain]::CurrentDomain) -EventName ProcessExit -Action {
-        Invoke-SafetyCleanup
+    # Register exit handler - simplified and robust
+    try {
+        $null = Register-ObjectEvent -InputObject ([System.AppDomain]::CurrentDomain) -EventName ProcessExit -Action {
+            try {
+                Invoke-SafetyCleanup
+            } catch {
+                # Silent fallback - don't break script execution
+            }
+        }
+    } catch {
+        # Silent fallback if event registration fails
+        try {
+            Write-LogEntry "Could not register cleanup handlers: $($_.Exception.Message)" "WARNING"
+        } catch {
+            # Silent fallback for logging too
+        }
     }
 }
 
@@ -2816,13 +2854,43 @@ if ($PSVersionTable.PSVersion.Major -lt 4) {
 # Check if this is an elevated process
 $Global:IsElevatedProcess = $args -contains "-Elevated"
 
+# Debug: Show elevated status
+if ($Global:IsElevatedProcess) {
+    try {
+        Write-Host "🚀 Elevated process started successfully" -ForegroundColor Green
+        Write-Host "📋 PowerShell Version: $($PSVersionTable.PSVersion)" -ForegroundColor Cyan
+        Write-Host "🔐 Admin Rights: $(if (Test-AdminPrivileges) { 'Yes' } else { 'No' })" -ForegroundColor Cyan
+        Start-Sleep -Seconds 1
+    } catch {
+        # Silent fallback
+    }
+}
+
 # Run main function
 if ($MyInvocation.InvocationName -ne '.') {
     try {
         Main
     } catch {
-        Write-ColorText "❌ Fatal error in main execution: $($_.Exception.Message)" -Color $Colors.Error
-        Write-LogEntry "Fatal error: $($_.Exception.Message)" "ERROR"
+        # Robust error handling for elevated process
+        try {
+            Write-ColorText "❌ Fatal error in main execution: $($_.Exception.Message)" -Color $Colors.Error
+        } catch {
+            Write-Host "❌ Fatal error in main execution: $($_.Exception.Message)" -ForegroundColor Red
+        }
+        
+        try {
+            Write-LogEntry "Fatal error: $($_.Exception.Message)" "ERROR"
+        } catch {
+            # Silent fallback for logging
+        }
+        
+        # Give user time to see error before closing
+        try {
+            Write-Host "`nPress any key to continue..." -ForegroundColor Yellow
+            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        } catch {
+            Start-Sleep -Seconds 3
+        }
     } finally {
         # Ensure clean exit
         try {
