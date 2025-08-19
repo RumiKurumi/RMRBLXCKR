@@ -7,7 +7,7 @@
     Mendukung semua versi Windows dengan safety measures dan secure by design
 .NOTES
     Version: 2.0
-    Author: Rumi
+    Author: RumiKurumi
     Compatible: Windows 7/8/8.1/10/11 (x86/x64/ARM64)
     Full Support: Windows 10 Build 1507+ / Windows 11 All Builds
 #>
