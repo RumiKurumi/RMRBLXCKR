@@ -179,13 +179,28 @@ function Request-AdminElevation {
                 # Download with visual progress
                 
                 # Download with visual progress
+                Write-ColorText "📥 Downloading Roblox Checker Script..." -Color $Colors.Info
                 $downloadSuccess = Show-DownloadProgress -Url $scriptUrl -OutFile $tempScript -Description "Downloading Roblox Checker Script"
                 
                 if (-not $downloadSuccess) {
                     throw "Download failed"
                 }
                 
-                Write-LogEntry "Downloaded script to: $tempScript" "INFO"
+                # Verify download completion
+                Write-ColorText "🔍 Memverifikasi download..." -Color $Colors.Info
+                Start-Sleep -Seconds 1  # Give file system time to complete
+                
+                if (-not (Test-Path $tempScript)) {
+                    throw "Downloaded script not found after verification"
+                }
+                
+                $finalSize = (Get-Item $tempScript).Length
+                if ($finalSize -lt 1000) {
+                    throw "Downloaded script too small ($finalSize bytes), may be corrupted"
+                }
+                
+                Write-ColorText "✅ Download verification berhasil ($([math]::Round($finalSize / 1KB, 1)) KB)" -Color $Colors.Success
+                Write-LogEntry "Downloaded script to: $tempScript (Size: $finalSize bytes)" "INFO"
                 
                 # Verify downloaded script
                 if (-not (Test-Path $tempScript)) {
@@ -400,6 +415,30 @@ function Start-CloudflareWARP {
 	Write-ColorText "🔧 Mempersiapkan WARP VPN..." -Color $Colors.Info
 	
 	try {
+		# Check if WARP needs initial setup
+		Write-ColorText "🔍 Memeriksa status WARP..." -Color $Colors.Info
+		$null = Start-Process $warpCliPath -ArgumentList "status" -PassThru -Wait -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\warp_initial_status.txt" -ErrorAction SilentlyContinue
+		
+		$initialStatus = ""
+		if (Test-Path "$env:TEMP\warp_initial_status.txt") {
+			$initialStatus = Get-Content "$env:TEMP\warp_initial_status.txt" -Raw
+			Remove-Item "$env:TEMP\warp_initial_status.txt" -Force -ErrorAction SilentlyContinue
+		}
+		
+		# Check if WARP needs registration
+		if ($initialStatus -like "*Registration Missing*" -or $initialStatus -like "*Manual deletion*" -or $initialStatus -like "*Unable*") {
+			Write-ColorText "⚠️ Auto-connect WARP gagal - Setup manual diperlukan" -Color $Colors.Warning
+			Write-ColorText "📋 Setup WARP secara manual:" -Color $Colors.Info
+			Write-ColorText "   1. WARP sudah running di system tray (kanan bawah)" -Color $Colors.Info
+			Write-ColorText "   2. Klik kanan icon WARP → 'Sign In' atau 'Enable WARP'" -Color $Colors.Info
+			Write-ColorText "   3. Ikuti wizard setup dan accept agreement" -Color $Colors.Info
+			Write-ColorText "   4. Setelah setup selesai, WARP akan otomatis connect" -Color $Colors.Info
+			
+			Write-ColorText "💡 WARP sudah running, setup dari system tray saja" -Color $Colors.Info
+			Write-ColorText "✅ Setelah setup manual selesai, WARP akan running otomatis" -Color $Colors.Success
+			return @{ Connected = $false; Method = 'NeedsManualSetup'; PID = $null; Service = $null; Status = $initialStatus }
+		}
+		
 		# Register WARP service untuk startup
 		Write-ColorText "⚙️ Mengatur startup service..." -Color $Colors.Info
 		$proc = Start-Process $warpCliPath -ArgumentList "register" -PassThru -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
@@ -1459,10 +1498,29 @@ function Install-CloudflareWARP {
 		$targetFile = Join-Path $tempRoot $fname
 		
 		Write-ColorText "📋 Nama file: $fname" -Color $Colors.Info
-		Write-ColorText "💾 Ukuran: $([math]::Round($resp.ContentLength / 1MB, 2)) MB" -Color $Colors.Info
+		
+		# Get real file size
+		$realSize = 0
+		try {
+			$realSize = $resp.ContentLength
+			if ($realSize -gt 0) {
+				$sizeMB = [math]::Round($realSize / 1MB, 2)
+				Write-ColorText "💾 Ukuran: $sizeMB MB" -Color $Colors.Info
+			} else {
+				Write-ColorText "💾 Ukuran: Mendeteksi..." -Color $Colors.Info
+			}
+		} catch {
+			Write-ColorText "💾 Ukuran: Mendeteksi..." -Color $Colors.Info
+		}
 		
 		Write-ColorText "⏳ Mengunduh file..." -Color $Colors.Info
-		$null = Invoke-WebRequest -Uri $downloadUrl -OutFile $targetFile -UseBasicParsing -MaximumRedirection 5 -ErrorAction Stop
+		
+		# Download with visual progress
+		$downloadSuccess = Show-DownloadProgress -Url $downloadUrl -OutFile $targetFile -Description "Downloading Cloudflare WARP"
+		
+		if (-not $downloadSuccess) {
+			throw "Download failed with progress bar method"
+		}
 		
 		# Verifikasi file berhasil didownload
 		if (Test-Path $targetFile) {
@@ -2146,21 +2204,21 @@ function Show-CountdownAndClose {
         
         # Try multiple methods to close terminal
         try {
-            # Method 1: Close PowerShell process
-            $currentProcess = Get-Process -Id $PID
-            $currentProcess.CloseMainWindow()
+            # Method 1: Force close current process
+            Stop-Process -Id $PID -Force -ErrorAction SilentlyContinue
         } catch {
             try {
                 # Method 2: Exit PowerShell
                 exit 0
             } catch {
                 try {
-                    # Method 3: Force close
-                    Stop-Process -Id $PID -Force
+                    # Method 3: Close console window
+                    $host.UI.RawUI.WindowTitle = "Closing..."
+                    Start-Sleep -Milliseconds 1000
+                    exit 0
                 } catch {
-                    # Method 4: Close console window
-                    Add-Type -AssemblyName System.Windows.Forms
-                    [System.Windows.Forms.Application]::Exit()
+                    # Method 4: Force exit
+                    [Environment]::Exit(0)
                 }
             }
         }
@@ -2193,31 +2251,23 @@ function Show-DownloadProgress {
             Write-LogEntry "Could not get file size: $($_.Exception.Message)" "WARNING"
         }
         
-        # Create WebClient
-        $webClient = New-Object System.Net.WebClient
-        
-        # Download with progress simulation
-        $startTime = Get-Date
-        $lastUpdate = $startTime
-        
         # Start download in background
+        $startTime = Get-Date
+        $spinners = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
+        $counter = 0
+        
+        # Start download job
         $job = Start-Job -ScriptBlock {
             param($url, $outFile)
             try {
-                $wc = New-Object System.Net.WebClient
-                $wc.DownloadFile($url, $outFile)
+                Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing
                 return "SUCCESS"
             } catch {
                 return "ERROR: $($_.Exception.Message)"
-            } finally {
-                if ($wc) { $wc.Dispose() }
             }
         } -ArgumentList $Url, $OutFile
         
         # Show progress while downloading
-        $spinners = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
-        $counter = 0
-        
         while ($job.State -eq "Running") {
             $spinner = $spinners[$counter % $spinners.Length]
             $elapsed = (Get-Date) - $startTime
