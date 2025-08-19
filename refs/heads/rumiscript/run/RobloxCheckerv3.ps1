@@ -307,7 +307,7 @@ function Invoke-RemoteExecution {
                 }
             } catch {}
             
-            return
+            exit 0
         }
     } catch {
         Write-Host ("❌ Error dalam remote execution: {0}" -f ($_.Exception.Message)) -ForegroundColor Red
@@ -2878,7 +2878,7 @@ function Main {
 		Write-ColorText "❌ Terjadi kesalahan tak terduga: $($_.Exception.Message)" -Color $Colors.Error
 		Write-ColorText "📄 Periksa log file untuk detail: $Global:LogFile" -Color $Colors.Info
 	} finally {
-		if (-not $AsChild -and -not $Global:SkipOuterFinal) {
+		if (-not $Global:SkipOuterFinal) {
 			# Animasi cleaning up sebelum keluar
 			try {
 				Write-ColorText "\n🧹 Membersihkan sisa-sisa sementara..." -Color $Colors.Header
