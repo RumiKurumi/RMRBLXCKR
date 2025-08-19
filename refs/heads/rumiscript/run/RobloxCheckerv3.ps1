@@ -205,8 +205,7 @@ function Request-AdminElevation {
     try {
         Write-Host "🔐 Program memerlukan hak akses Administrator" -ForegroundColor Yellow
         Write-Host "📋 Fitur yang memerlukan admin: Registry repair, Winsock reset, Service management" -ForegroundColor Cyan
-        Write-Host "💡 Jalankan PowerShell sebagai Administrator dan jalankan script ini lagi" -ForegroundColor Cyan
-        Write-Host "🔗 Atau download manual dari: https://github.com/RumiKurumi/RMRBLXCKR" -ForegroundColor Cyan
+        Write-Host "💡 Jalankan PowerShell/Terminal sebagai Administrator dan jalankan script ini lagi" -ForegroundColor Cyan
         Write-Host "⏳ Program akan menutup dalam 2 detik..." -ForegroundColor Yellow
         Start-Sleep -Seconds 2
         exit 1
