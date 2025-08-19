@@ -15,7 +15,8 @@
 param(
     [switch]$Debug,
     [switch]$NoCleanup,
-    [string]$LogPath = "$env:TEMP\RobloxChecker"
+    [string]$LogPath = "$env:TEMP\RobloxChecker",
+    [switch]$AsChild
 )
 
 # ==================== INITIALIZATION ====================
@@ -294,7 +295,10 @@ function Invoke-RemoteExecution {
                 }
                 Write-Host ""
             } catch {}
-            & $tempScript
+            & $tempScript -AsChild
+            
+            # After child completes, mark to skip outer final prints
+            $Global:SkipOuterFinal = $true
             
             # Cleanup temp file after execution
             try {
@@ -303,7 +307,7 @@ function Invoke-RemoteExecution {
                 }
             } catch {}
             
-            exit 0
+            return
         }
     } catch {
         Write-Host ("❌ Error dalam remote execution: {0}" -f ($_.Exception.Message)) -ForegroundColor Red
@@ -396,18 +400,28 @@ function Show-WarpInstallBanner {
 
 	# Simplified banner yang lebih clean dan tidak ada artifact
 	$banner = @"
-╔══════════════════════════════════════════════════════════════╗
-║                    🌐 CLOUDFLARE WARP 🌐                    ║
-║                                                              ║
-║                ██████████████████████████                   ║
-║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
-║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
-║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
-║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
-║                ██████████████████████████                   ║
-║                                                              ║
-║              🚀 SILENT INSTALLATION MODE                    ║
-╚══════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                           🌐 CLOUDFLARE WARP 🌐                             ║
+║                                                                              ║
+║   ███████████                               ███                              ║
+║   ░░███░░░░░███                             ░░░                              ║
+║   ░███    ░███  █████ ████ █████████████   ████                              ║
+║   ░██████████  ░░███ ░███ ░░███░░███░░███ ░░███                              ║
+║   ░███░░░░░███  ░███ ░███  ░███ ░███ ░███  ░███                              ║
+║   ░███    ░███  ░███ ░███  ░███ ░███ ░███  ░███                              ║
+║   █████   █████ ░░████████ █████░███ █████ █████                             ║
+║   ░░░░░   ░░░░░   ░░░░░░░░ ░░░░░ ░░░ ░░░░░ ░░░░░                             ║
+║   █████████  █████                        █████                              ║
+║   ███░░░░░███░░███                        ░░███                              ║
+║   ███     ░░░  ░███████    ██████   ██████  ░███ █████  ██████  ████████     ║
+║   ░███          ░███░░███  ███░░███ ███░░███ ░███░░███  ███░░███░░███░░███   ║
+║   ░███          ░███ ░███ ░███████ ░███ ░░░  ░██████░  ░███████  ░███ ░░░    ║
+║   ░░███     ███ ░███ ░███ ░███░░░  ░███  ███ ░███░░███ ░███░░░   ░███        ║
+║   ░░█████████  ████ █████░░██████ ░░██████  ████ █████░░██████  █████        ║
+║   ░░░░░░░░░  ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░ ░░░░░  ░░░░░░  ░░░░░          ║
+║                                                                              ║
+║                       🚀 SILENT INSTALLATION MODE                            ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 "@
 
 	# Clean terminal redraw tanpa artifact
@@ -2813,6 +2827,10 @@ function Main {
 		
 		# Initialize environment
 		Initialize-Environment
+		
+		# Brief pause after initialization/system info before showing main menu
+		Start-Sleep -Seconds 2
+		
 		Register-CleanupHandlers
 		$originalPolicy = Set-ExecutionPolicyTemporary
 		try {
@@ -2860,18 +2878,24 @@ function Main {
 		Write-ColorText "❌ Terjadi kesalahan tak terduga: $($_.Exception.Message)" -Color $Colors.Error
 		Write-ColorText "📄 Periksa log file untuk detail: $Global:LogFile" -Color $Colors.Info
 	} finally {
-		# Animasi cleaning up sebelum keluar
-		try {
-			Write-ColorText "\n🧹 Membersihkan sisa-sisa sementara..." -Color $Colors.Header
-			Show-LoadingSpinner -Text "Cleaning up" -Duration 2
-		} catch {}
-		Invoke-SafetyCleanup
-		if ($originalPolicy) { Restore-ExecutionPolicy -OriginalPolicy $originalPolicy }
-		Write-LogEntry "=== ROBLOX CHECKER SESSION ENDED ===" "INFO"
-		Show-Goodbye
-		
-		# Auto-close terminal dengan countdown
-		Show-CountdownAndClose -Seconds 5
+		if (-not $AsChild -and -not $Global:SkipOuterFinal) {
+			# Animasi cleaning up sebelum keluar
+			try {
+				Write-ColorText "\n🧹 Membersihkan sisa-sisa sementara..." -Color $Colors.Header
+				Show-LoadingSpinner -Text "Cleaning up" -Duration 2
+			} catch {}
+			Invoke-SafetyCleanup
+			if ($originalPolicy) { Restore-ExecutionPolicy -OriginalPolicy $originalPolicy }
+			Write-LogEntry "=== ROBLOX CHECKER SESSION ENDED ===" "INFO"
+			Show-Goodbye
+			
+			# Auto-close terminal dengan countdown
+			Show-CountdownAndClose -Seconds 5
+		} else {
+			# Minimal silent cleanup without double prints
+			try { Invoke-SafetyCleanup } catch {}
+			try { if ($originalPolicy) { Restore-ExecutionPolicy -OriginalPolicy $originalPolicy } } catch {}
+		}
 	}
 }
 
