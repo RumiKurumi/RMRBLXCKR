@@ -105,10 +105,19 @@ function Test-WindowsCompatibility {
 			$compatibility.SupportsWMI = $false
 		}
 		
-		Write-LogEntry "Compatibility: OS=$($compatibility.CompatibilityLevel), Build=$($compatibility.OSBuild), Arch=$($compatibility.Architecture), PS=$($compatibility.PowerShellVersion)" "INFO"
+		# Log compatibility info only if logging is available
+		try {
+			Write-LogEntry "Compatibility: OS=$($compatibility.CompatibilityLevel), Build=$($compatibility.OSBuild), Arch=$($compatibility.Architecture), PS=$($compatibility.PowerShellVersion)" "INFO"
+		} catch {
+			# Silent fallback - don't break initialization
+		}
 		
 	} catch {
-		Write-LogEntry "Error checking Windows compatibility: $($_.Exception.Message)" "ERROR"
+		try {
+			Write-LogEntry "Error checking Windows compatibility: $($_.Exception.Message)" "ERROR"
+		} catch {
+			# Silent fallback - don't break initialization
+		}
 	}
 	
 	return $compatibility
@@ -335,11 +344,21 @@ function Write-LogEntry {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $logEntry = "[$timestamp] [$Level] $Message"
     
-    if ($Global:LogFile -and (Test-Path (Split-Path $Global:LogFile -Parent))) {
+    # Robust logging - handle cases where LogFile is not yet initialized
+    if ($Global:LogFile -and $Global:LogFile -ne "" -and (Test-Path (Split-Path $Global:LogFile -Parent))) {
         try {
             Add-Content -Path $Global:LogFile -Value $logEntry -Encoding UTF8
         } catch {
             # Ignore log write errors to prevent infinite loops
+            # Write to console as fallback for critical errors
+            if ($Level -eq 'ERROR') {
+                Write-Host "LOG ERROR: $Message" -ForegroundColor Red
+            }
+        }
+    } else {
+        # Fallback logging to console for early initialization errors
+        if ($Level -eq 'ERROR') {
+            Write-Host "INIT ERROR: $Message" -ForegroundColor Red
         }
     }
     
@@ -376,28 +395,18 @@ function Show-WarpInstallBanner {
 
 	# Simplified banner yang lebih clean dan tidak ada artifact
 	$banner = @"
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                           🌐 CLOUDFLARE WARP 🌐                             ║
-║                                                                              ║
-║   ███████████                               ███                              ║
-║   ░░███░░░░░███                             ░░░                              ║
-║   ░███    ░███  █████ ████ █████████████   ████                              ║
-║   ░██████████  ░░███ ░███ ░░███░░███░░███ ░░███                              ║
-║   ░███░░░░░███  ░███ ░███  ░███ ░███ ░███  ░███                              ║
-║   ░███    ░███  ░███ ░███  ░███ ░███ ░███  ░███                              ║
-║   █████   █████ ░░████████ █████░███ █████ █████                             ║
-║   ░░░░░   ░░░░░   ░░░░░░░░ ░░░░░ ░░░ ░░░░░ ░░░░░                             ║
-║   █████████  █████                        █████                              ║
-║   ███░░░░░███░░███                        ░░███                              ║
-║   ███     ░░░  ░███████    ██████   ██████  ░███ █████  ██████  ████████     ║
-║   ░███          ░███░░███  ███░░███ ███░░███ ░███░░███  ███░░███░░███░░███   ║
-║   ░███          ░███ ░███ ░███████ ░███ ░░░  ░██████░  ░███████  ░███ ░░░    ║
-║   ░░███     ███ ░███ ░███ ░███░░░  ░███  ███ ░███░░███ ░███░░░   ░███        ║
-║   ░░█████████  ████ █████░░██████ ░░██████  ████ █████░░██████  █████        ║
-║   ░░░░░░░░░  ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░ ░░░░░  ░░░░░░  ░░░░░          ║
-║                                                                              ║
-║                       🚀 SILENT INSTALLATION MODE                            ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║                    🌐 CLOUDFLARE WARP 🌐                    ║
+║                                                              ║
+║                ██████████████████████████                   ║
+║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
+║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
+║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
+║                ██░░░░░░░░░░░░░░░░░░░░░░██                   ║
+║                ██████████████████████████                   ║
+║                                                              ║
+║              🚀 SILENT INSTALLATION MODE                    ║
+╚══════════════════════════════════════════════════════════════╝
 "@
 
 	# Clean terminal redraw tanpa artifact
@@ -469,11 +478,11 @@ function Start-CloudflareWARP {
 			Write-Host ""
 			Write-ColorText "📋 Setup WARP secara manual:" -Color $Colors.Info
 			Write-ColorText "   1. WARP sudah running di system tray (kanan bawah)" -Color $Colors.Info
-			Write-ColorText "   2. Klik system tray nya nanti ada icon WARP bentuknya awan ☁️" -Color $Colors.Info
-			Write-ColorText "   3. Ikuti wizard setupnya klik 'Next' dan 'Accept' agreement" -Color $Colors.Info
-			Write-ColorText "   4. Setelah setup selesai, WARP akan otomatis connect (Tapi Kalo Disconnected, nyalain aja klik toggle buttonnya)" -Color $Colors.Info
+			Write-ColorText "   2. Klik kanan icon WARP → 'Sign In' atau 'Enable WARP'" -Color $Colors.Info
+			Write-ColorText "   3. Ikuti wizard setup dan accept agreement" -Color $Colors.Info
+			Write-ColorText "   4. Setelah setup selesai, WARP akan otomatis connect" -Color $Colors.Info
 			Write-Host ""
-			Write-ColorText "💡 WARP sudah running, setupnya dari system tray saja" -Color $Colors.Info
+			Write-ColorText "💡 WARP sudah running, setup dari system tray saja" -Color $Colors.Info
 			Write-ColorText "✅ Setelah setup manual selesai, WARP akan running otomatis" -Color $Colors.Success
 			Write-Host ""
 			return @{ Connected = $false; Method = 'NeedsManualSetup'; PID = $null; Service = $null; Status = $initialStatus }
@@ -601,7 +610,12 @@ function Get-TimeBasedGreeting {
 }
 
 function Initialize-Environment {
-	Write-LogEntry "Initializing Roblox Checker environment" "INFO"
+	# Initialize logging first before any other operations
+	try {
+		Write-LogEntry "Initializing Roblox Checker environment" "INFO"
+	} catch {
+		# Silent fallback - logging not ready yet
+	}
 	
 	# Check Windows compatibility first
 	$Global:WindowsCompatibility = Test-WindowsCompatibility
@@ -644,12 +658,16 @@ function Initialize-Environment {
 	# Set log file path
 	$Global:LogFile = Join-Path $script:LogPath "RobloxChecker_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 	
-	# Log system info
-	Write-LogEntry "=== ROBLOX CHECKER SESSION STARTED ===" "INFO"
-	Write-LogEntry "Script Version: $Global:ScriptVersion" "INFO"
-	Write-LogEntry "Computer: $env:COMPUTERNAME" "INFO"
-	Write-LogEntry "User: $env:USERNAME" "INFO"
-	Write-LogEntry "Compatibility: $($Global:WindowsCompatibility.CompatibilityLevel) Build $($Global:WindowsCompatibility.OSBuild) $($Global:WindowsCompatibility.Architecture)" "INFO"
+	# Log system info - only after LogFile is properly initialized
+	try {
+		Write-LogEntry "=== ROBLOX CHECKER SESSION STARTED ===" "INFO"
+		Write-LogEntry "Script Version: $Global:ScriptVersion" "INFO"
+		Write-LogEntry "Computer: $env:COMPUTERNAME" "INFO"
+		Write-LogEntry "User: $env:USERNAME" "INFO"
+		Write-LogEntry "Compatibility: $($Global:WindowsCompatibility.CompatibilityLevel) Build $($Global:WindowsCompatibility.OSBuild) $($Global:WindowsCompatibility.Architecture)" "INFO"
+	} catch {
+		# Silent fallback - logging not ready yet
+	}
 }
 
 function Write-TypewriterText {
