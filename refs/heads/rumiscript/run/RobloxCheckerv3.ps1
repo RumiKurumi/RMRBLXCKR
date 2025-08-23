@@ -16,7 +16,8 @@ param(
     [switch]$Debug,
     [switch]$NoCleanup,
     [string]$LogPath = "$env:TEMP\RobloxChecker",
-    [switch]$AsChild
+    [switch]$AsChild,
+    [switch]$IsRemoteExecution
 )
 
 # ==================== INITIALIZATION ====================
@@ -30,6 +31,7 @@ $Global:LogFile = ""
 $Global:TempFiles = @()
 $Global:ProcessesToCleanup = @()
 $Global:SafetyBackups = @()
+$Global:IsRemoteExecution = $false
 
 # Colors for UI
 $Colors = @{
@@ -361,7 +363,7 @@ function Invoke-RemoteExecution {
                 }
                 Write-Host ""
             } catch {}
-            & $tempScript -AsChild
+            & $tempScript -AsChild -IsRemoteExecution
             
             # After child completes, mark to skip outer final prints
             $Global:SkipOuterFinal = $true
@@ -3302,6 +3304,12 @@ function Register-CleanupHandlers {
 # ==================== MAIN SCRIPT EXECUTION ====================
 
 function Main {
+	# Set remote execution flag to prevent duplication
+	if ($IsRemoteExecution) {
+		$Global:IsRemoteExecution = $true
+		Write-ColorText "🔄 Script dijalankan dalam mode remote execution" -Color $Colors.Info
+	}
+	
 	Ensure-ExecutionPolicy
 	$startTime = Get-Date
 	Write-LogEntry "=== ROBLOX CHECKER SESSION STARTED ===" "INFO" -FunctionName "Main" -AdditionalData @{
@@ -3326,8 +3334,13 @@ function Main {
 		Write-ColorText "✅ Berjalan dengan hak akses Administrator" -Color $Colors.Success
 		
 		# Admin shell confirmed; if executed via irm|iex, download and run the script from temp
-		Write-LogEntry "Invoking remote execution check" "INFO" -FunctionName "Main"
-		Invoke-RemoteExecution
+		# Only run remote execution check if not already in remote mode
+		if (-not $Global:IsRemoteExecution) {
+			Write-LogEntry "Invoking remote execution check" "INFO" -FunctionName "Main"
+			Invoke-RemoteExecution
+		} else {
+			Write-LogEntry "Skipping remote execution check (already in remote mode)" "INFO" -FunctionName "Main"
+		}
 
 		# Initialize environment
 		Write-LogEntry "Initializing environment" "INFO" -FunctionName "Main"
