@@ -891,10 +891,10 @@ function Show-Header {
 
     # Decorative, multi-color, emoji-rich header
     Write-TypewriterText "🟡★══════════════════════════════════════════════════════════════★🟡" $Colors.Accent 2
-    Write-TypewriterText "║   ✨                                                ✨   ║" $Colors.Header 2
-    Write-TypewriterText "║   				🎮  ROBLOX CHECKER BY RUMI  🛡️        ║" $Colors.Header 2
-    Write-TypewriterText "║   				🏷️  Version $Global:ScriptVersion              ║" $Colors.Header 2
-    Write-TypewriterText "║   ✨                                                   	 ✨   ║" $Colors.Header 2
+    Write-TypewriterText "║   ✨                                                          ✨   ║" $Colors.Header 2
+    Write-TypewriterText "║   				🎮  ROBLOX CHECKER BY RUMI  🛡️                     ║" $Colors.Header 2
+    Write-TypewriterText "║   				🏷️  Version $Global:ScriptVersion                  ║" $Colors.Header 2
+    Write-TypewriterText "║   ✨                                                          ✨   ║" $Colors.Header 2
     Write-TypewriterText "🟡★══════════════════════════════════════════════════════════════★🟡" $Colors.Accent 2
 	Write-Host ""
 	Write-TypewriterText $greeting $Colors.Info 5
