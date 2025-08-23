@@ -45,40 +45,68 @@ $Colors = @{
 # ==================== EXECUTION POLICY & MEMORY DUMP FUNCTIONS ====================
 
 function Ensure-ExecutionPolicy {
+    Write-ColorText "🔒 Sebentar yaa, memeriksa Execution Policy..." -Color $Colors.Info
+    Show-LoadingSpinner -Text "Checking Execution Policy" -Duration 1
+    
     $currentPolicy = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
-    Write-ColorText "🔒 Memeriksa Execution Policy: $currentPolicy" -Color $Colors.Info
+    Write-ColorText "📋 Current Policy: $currentPolicy" -Color $Colors.Info
+    
     if ($currentPolicy -ne "Bypass" -and $currentPolicy -ne "RemoteSigned") {
+        Write-ColorText "⚠️ Policy terlalu restrictive, mengubah ke Bypass..." -Color $Colors.Warning
+        Show-LoadingSpinner -Text "Changing Execution Policy to Bypass" -Duration 1
+        
         try {
             Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser -Force -ErrorAction Stop
-            Write-ColorText "✅ Execution Policy diubah ke: Bypass (sementara)" -Color $Colors.Success
+            Write-ColorText "✅ Yeyy!! Execution Policy berhasil diubah ke: Bypass" -Color $Colors.Success
+            Show-LoadingSpinner -Text "Policy updated successfully" -Duration 1
         } catch {
+            Write-ColorText "⚠️ Fallback ke RemoteSigned..." -Color $Colors.Warning
+            Show-LoadingSpinner -Text "Trying RemoteSigned as fallback" -Duration 1
+            
             try {
                 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force -ErrorAction Stop
                 Write-ColorText "✅ Execution Policy diubah ke: RemoteSigned (fallback)" -Color $Colors.Success
+                Show-LoadingSpinner -Text "Policy updated with fallback" -Duration 1
             } catch {
                 Write-ColorText "❌ Gagal mengubah Execution Policy: $($_.Exception.Message)" -Color $Colors.Error
             }
         }
     } else {
         Write-ColorText "✅ Execution Policy sudah sesuai: $currentPolicy" -Color $Colors.Success
+        Show-LoadingSpinner -Text "Policy check completed" -Duration 1
     }
+    
+    # Delay sebelum lanjut ke proses selanjutnya
+    Write-ColorText "⏳ Menyiapkan environment validator dulu..." -Color $Colors.Info
+    Show-LoadingSpinner -Text "Preparing environment" -Duration 2
+    Write-Host ""
 }
 
 function Backup-RobloxMemoryDump {
+    Write-ColorText "💾 Memeriksa memory dump Roblox..." -Color $Colors.Info
+    Show-LoadingSpinner -Text "Checking for Roblox memory dump" -Duration 1
+    
     $dumpPath = "$env:LOCALAPPDATA/TempHYP1197.tmp"
     if (Test-Path $dumpPath) {
+        Write-ColorText "📁 Memory dump ditemukan, memulai backup..." -Color $Colors.Warning
+        Show-LoadingSpinner -Text "Backing up memory dump" -Duration 1
+        
         try {
             $logFolder = $script:LogPath
             if (-not (Test-Path $logFolder)) { New-Item -Path $logFolder -ItemType Directory -Force | Out-Null }
             $dest = Join-Path $logFolder "RobloxMemoryDump_$(Get-Date -Format 'yyyyMMdd_HHmmss').tmp"
             Copy-Item $dumpPath $dest -Force
-            Write-ColorText "💾 Memory dump Roblox ditemukan dan dibackup ke: $dest" -Color $Colors.Success
+            Write-ColorText "✅ Memory dump Roblox berhasil dibackup ke: $dest" -Color $Colors.Success
+            Show-LoadingSpinner -Text "Backup completed successfully" -Duration 1
         } catch {
             Write-ColorText "❌ Gagal membackup memory dump: $($_.Exception.Message)" -Color $Colors.Error
         }
     } else {
         Write-ColorText "ℹ️ Tidak ditemukan memory dump Roblox di $dumpPath" -Color $Colors.Info
+        Show-LoadingSpinner -Text "No memory dump found" -Duration 1
     }
+    
+    Write-Host ""
 }
 
 # ==================== WINDOWS COMPATIBILITY CHECK ====================
