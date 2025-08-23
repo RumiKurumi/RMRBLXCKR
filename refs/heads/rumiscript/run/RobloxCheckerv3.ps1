@@ -3275,6 +3275,12 @@ function Invoke-CacheCleanOnly {
 # ==================== SIGNAL HANDLERS ====================
 
 function Register-CleanupHandlers {
+    # Skip cleanup handlers for remote execution to prevent duplication
+    if ($Global:IsRemoteExecution) {
+        Write-LogEntry "Skipping cleanup handlers registration (remote execution mode)" "INFO"
+        return
+    }
+    
     # Register Ctrl+C handler - simplified and robust
     try {
         [Console]::TreatControlCAsInput = $false
@@ -3286,7 +3292,10 @@ function Register-CleanupHandlers {
     try {
         $null = Register-ObjectEvent -InputObject ([System.AppDomain]::CurrentDomain) -EventName ProcessExit -Action {
             try {
-                Invoke-SafetyCleanup
+                # Only run cleanup if not in remote execution mode
+                if (-not $Global:IsRemoteExecution) {
+                    Invoke-SafetyCleanup
+                }
             } catch {
                 # Silent fallback - don't break script execution
             }
@@ -3461,7 +3470,15 @@ function Main {
 			SkipOuterFinal = $Global:SkipOuterFinal
 		}
 		
-		if (-not $Global:SkipOuterFinal) {
+		# Prevent cleanup duplication for remote execution
+		if ($Global:IsRemoteExecution) {
+			# Skip cleanup for remote execution to prevent duplication
+			Write-LogEntry "=== ROBLOX CHECKER SESSION ENDED (Remote Mode) ===" "INFO" -FunctionName "Main" -AdditionalData @{
+				SessionDuration = $sessionDuration
+				RemoteExecution = $true
+				SkipCleanup = $true
+			}
+		} elseif (-not $Global:SkipOuterFinal) {
 			# Animasi cleaning up sebelum keluar
 			try {
 				Write-ColorText "\n🧹 Membersihkan sisa-sisa sementara..." -Color $Colors.Header
