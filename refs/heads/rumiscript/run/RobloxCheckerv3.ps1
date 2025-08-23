@@ -42,6 +42,45 @@ $Colors = @{
     Accent = 'DarkYellow'   # Orange/Peach
 }
 
+# ==================== EXECUTION POLICY & MEMORY DUMP FUNCTIONS ====================
+
+function Ensure-ExecutionPolicy {
+    $currentPolicy = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
+    Write-ColorText "🔒 Memeriksa Execution Policy: $currentPolicy" -Color $Colors.Info
+    if ($currentPolicy -ne "Bypass" -and $currentPolicy -ne "RemoteSigned") {
+        try {
+            Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser -Force -ErrorAction Stop
+            Write-ColorText "✅ Execution Policy diubah ke: Bypass (sementara)" -Color $Colors.Success
+        } catch {
+            try {
+                Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force -ErrorAction Stop
+                Write-ColorText "✅ Execution Policy diubah ke: RemoteSigned (fallback)" -Color $Colors.Success
+            } catch {
+                Write-ColorText "❌ Gagal mengubah Execution Policy: $($_.Exception.Message)" -Color $Colors.Error
+            }
+        }
+    } else {
+        Write-ColorText "✅ Execution Policy sudah sesuai: $currentPolicy" -Color $Colors.Success
+    }
+}
+
+function Backup-RobloxMemoryDump {
+    $dumpPath = "$env:LOCALAPPDATA/TempHYP1197.tmp"
+    if (Test-Path $dumpPath) {
+        try {
+            $logFolder = $script:LogPath
+            if (-not (Test-Path $logFolder)) { New-Item -Path $logFolder -ItemType Directory -Force | Out-Null }
+            $dest = Join-Path $logFolder "RobloxMemoryDump_$(Get-Date -Format 'yyyyMMdd_HHmmss').tmp"
+            Copy-Item $dumpPath $dest -Force
+            Write-ColorText "💾 Memory dump Roblox ditemukan dan dibackup ke: $dest" -Color $Colors.Success
+        } catch {
+            Write-ColorText "❌ Gagal membackup memory dump: $($_.Exception.Message)" -Color $Colors.Error
+        }
+    } else {
+        Write-ColorText "ℹ️ Tidak ditemukan memory dump Roblox di $dumpPath" -Color $Colors.Info
+    }
+}
+
 # ==================== WINDOWS COMPATIBILITY CHECK ====================
 
 function Test-WindowsCompatibility {
@@ -778,10 +817,12 @@ function Initialize-Environment {
 		# Silent fallback - logging not ready yet
 	}
 
-	# Setelah log folder diinisialisasi (setelah $script:LogPath)
+	# Backup Roblox memory dump if exists
 	try {
 		Backup-RobloxMemoryDump
-	} catch {}
+	} catch {
+		# Silent fallback if backup fails
+	}
 }
 
 function Write-TypewriterText {
@@ -3233,6 +3274,7 @@ function Register-CleanupHandlers {
 # ==================== MAIN SCRIPT EXECUTION ====================
 
 function Main {
+	Ensure-ExecutionPolicy
 	$startTime = Get-Date
 	Write-LogEntry "=== ROBLOX CHECKER SESSION STARTED ===" "INFO" -FunctionName "Main" -AdditionalData @{
 		StartTime = $startTime.ToString("yyyy-MM-dd HH:mm:ss")
@@ -3441,56 +3483,3 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
 }
 
-# --- Add at the top, after param/global vars (for new helper functions) ---
-function Ensure-ExecutionPolicy {
-    $currentPolicy = Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue
-    Write-ColorText "🔒 Memeriksa Execution Policy: $currentPolicy" -Color $Colors.Info
-    if ($currentPolicy -ne "Bypass" -and $currentPolicy -ne "RemoteSigned") {
-        try {
-            Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser -Force -ErrorAction Stop
-            Write-ColorText "✅ Execution Policy diubah ke: Bypass (sementara)" -Color $Colors.Success
-        } catch {
-            try {
-                Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force -ErrorAction Stop
-                Write-ColorText "✅ Execution Policy diubah ke: RemoteSigned (fallback)" -Color $Colors.Success
-            } catch {
-                Write-ColorText "❌ Gagal mengubah Execution Policy: $($_.Exception.Message)" -Color $Colors.Error
-            }
-        }
-    } else {
-        Write-ColorText "✅ Execution Policy sudah sesuai: $currentPolicy" -Color $Colors.Success
-    }
-}
-
-function Backup-RobloxMemoryDump {
-    $dumpPath = "$env:LOCALAPPDATA/TempHYP1197.tmp"
-    if (Test-Path $dumpPath) {
-        try {
-            $logFolder = $script:LogPath
-            if (-not (Test-Path $logFolder)) { New-Item -Path $logFolder -ItemType Directory -Force | Out-Null }
-            $dest = Join-Path $logFolder "RobloxMemoryDump_$(Get-Date -Format 'yyyyMMdd_HHmmss').tmp"
-            Copy-Item $dumpPath $dest -Force
-            Write-ColorText "💾 Memory dump Roblox ditemukan dan dibackup ke: $dest" -Color $Colors.Success
-        } catch {
-            Write-ColorText "❌ Gagal membackup memory dump: $($_.Exception.Message)" -Color $Colors.Error
-        }
-    } else {
-        Write-ColorText "ℹ️ Tidak ditemukan memory dump Roblox di $dumpPath" -Color $Colors.Info
-    }
-}
-
-# --- In Main, call Ensure-ExecutionPolicy at the very top (before admin check) ---
-function Main {
-    Ensure-ExecutionPolicy
-    $startTime = Get-Date
-    # ... existing code ...
-
-# --- In Initialize-Environment, after log folder is set up, call Backup-RobloxMemoryDump ---
-function Initialize-Environment {
-    # ... existing code ...
-    # Setelah log folder diinisialisasi (setelah $script:LogPath)
-    try {
-        Backup-RobloxMemoryDump
-    } catch {}
-    # ... existing code ...
-}
